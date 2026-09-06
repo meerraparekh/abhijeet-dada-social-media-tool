@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Satsang Clips</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <aside id="sidebar">
+    <h1>Satsang <span>Clips</span></h1>
+    <div id="sessionList"></div>
+    <form id="newSessionForm">
+      <label style="font-size:12px;color:var(--muted)">New session</label>
+      <input type="text" id="newSessionName" placeholder="e.g. 2026-09-06 satsang" required />
+      <input type="file" id="newSessionFile" accept="video/*" required />
+      <button type="submit">Upload &amp; create</button>
+      <div id="uploadProgress" class="progress-note"></div>
+    </form>
+  </aside>
+  <main id="main">
+    <div class="empty-state">Select or create a session on the left to get started.</div>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
