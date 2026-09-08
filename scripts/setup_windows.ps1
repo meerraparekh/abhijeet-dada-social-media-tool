@@ -14,7 +14,26 @@ if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
   }
 }
 
-python -m venv .venv
+# Prefer a Python version known to have ready-made (prebuilt) packages for every
+# dependency here. Very new Python versions (e.g. 3.14) often lack prebuilt
+# wheels for libraries like pydantic-core, which then fails to install unless
+# you have a C/Rust compiler toolchain - avoid that entirely by targeting 3.12.
+$pythonCmd = $null
+foreach ($candidate in @("3.12", "3.11", "3.13", "3.10")) {
+  if (Get-Command py -ErrorAction SilentlyContinue) {
+    py -$candidate --version *> $null
+    if ($LASTEXITCODE -eq 0) { $pythonCmd = @("py", "-$candidate"); break }
+  }
+}
+if (-not $pythonCmd) {
+  Write-Host "No Python 3.10-3.13 found via the 'py' launcher."
+  Write-Host "Install Python 3.12 from https://www.python.org/downloads/release/python-3120/"
+  Write-Host "(check 'Add python.exe to PATH' during install), then re-run this script."
+  exit 1
+}
+Write-Host "Using Python: $($pythonCmd -join ' ')"
+
+& $pythonCmd[0] $pythonCmd[1] -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install --upgrade pip
 pip install -r requirements.txt
