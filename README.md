@@ -110,6 +110,7 @@ however you like.
 | `ANTHROPIC_API_KEY` | - | required for the "Suggest clips" step |
 | `SATSANG_CLAUDE_MODEL` | `claude-sonnet-5` | model used for clip suggestions |
 | `WHISPER_MODEL_SIZE` | `small` | faster-whisper model size (`base`/`small` for CPU laptops; `medium`/`large-v3` if you have a GPU) |
+| `WHISPER_CPU_THREADS` | (cores - 1) | CPU threads faster-whisper uses. It doesn't auto-detect this well, so we default to nearly all your cores - lower it if transcription is starving other apps |
 | `SATSANG_DATA_DIR` | `./data` | where sessions/transcripts/clips are stored |
 
 ## Project layout

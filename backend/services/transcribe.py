@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from config import WHISPER_COMPUTE_TYPE, WHISPER_DEVICE, WHISPER_MODEL_SIZE
+from config import WHISPER_COMPUTE_TYPE, WHISPER_CPU_THREADS, WHISPER_DEVICE, WHISPER_MODEL_SIZE
 from schemas import Transcript, TranscriptSegment, TranscriptWord
 
 _model = None
@@ -20,7 +20,10 @@ def _get_model():
         from faster_whisper import WhisperModel
 
         _model = WhisperModel(
-            WHISPER_MODEL_SIZE, device=WHISPER_DEVICE, compute_type=WHISPER_COMPUTE_TYPE
+            WHISPER_MODEL_SIZE,
+            device=WHISPER_DEVICE,
+            compute_type=WHISPER_COMPUTE_TYPE,
+            cpu_threads=WHISPER_CPU_THREADS if WHISPER_DEVICE == "cpu" else 0,
         )
     return _model
 
