@@ -8,7 +8,13 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from config import WHISPER_COMPUTE_TYPE, WHISPER_CPU_THREADS, WHISPER_DEVICE, WHISPER_MODEL_SIZE
+from config import (
+    WHISPER_BEAM_SIZE,
+    WHISPER_COMPUTE_TYPE,
+    WHISPER_CPU_THREADS,
+    WHISPER_DEVICE,
+    WHISPER_MODEL_SIZE,
+)
 from schemas import Transcript, TranscriptSegment, TranscriptWord
 
 _model = None
@@ -36,6 +42,7 @@ def transcribe(video_path: str, progress_cb: Optional[Callable[[str], None]] = N
         video_path,
         word_timestamps=True,
         vad_filter=True,  # skip long silences, which a 2-hour recording usually has plenty of
+        beam_size=WHISPER_BEAM_SIZE,
     )
 
     segments = []

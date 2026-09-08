@@ -16,6 +16,14 @@ WHISPER_DEVICE = os.environ.get("WHISPER_DEVICE", "cpu")
 # use all cores automatically), which badly under-uses modern multi-core
 # laptops - explicitly hand it (most of) the machine's logical cores.
 WHISPER_CPU_THREADS = int(os.environ.get("WHISPER_CPU_THREADS", max(1, (os.cpu_count() or 4) - 1)))
+# Whisper's decoder generates one token at a time and by default explores
+# several alternative sequences per step ("beam search"). That's the actual
+# CPU bottleneck for single-file transcription - it doesn't parallelize
+# across cores the way encoding does, so more threads barely help it. Greedy
+# decoding (beam_size=1) is several times faster with only a small, usually
+# unnoticeable accuracy cost for this use case (finding clip-worthy moments,
+# not a verbatim legal transcript).
+WHISPER_BEAM_SIZE = int(os.environ.get("WHISPER_BEAM_SIZE", "1"))
 
 # Claude model used to turn a transcript into clip suggestions.
 CLAUDE_MODEL = os.environ.get("SATSANG_CLAUDE_MODEL", "claude-sonnet-5")
