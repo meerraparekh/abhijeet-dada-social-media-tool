@@ -19,8 +19,10 @@ PRESETS = {
 }
 
 
-def _run(cmd: List[str]) -> None:
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+def _run(cmd: List[str], cwd: Path | None = None) -> None:
+    result = subprocess.run(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=str(cwd) if cwd else None
+    )
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg failed ({' '.join(cmd)}):\n{result.stdout[-4000:]}")
 
@@ -81,9 +83,15 @@ def render_clip_for_platform(
         srt_path.write_text(
             _words_to_srt(words, clip.start_seconds, clip.end_seconds), encoding="utf-8"
         )
-        escaped = str(srt_path).replace("\\", "/").replace(":", "\\:")
+        # Reference the subtitle file by its bare filename and run ffmpeg with
+        # its working directory set to out_dir, rather than embedding the
+        # absolute path in the filter string. The subtitles filter's mini
+        # -language treats ":" as a field separator, and an absolute Windows
+        # path's drive-letter colon (C:\...) is a well-known source of
+        # "unable to parse" failures there even when escaped - a bare
+        # filename has no colons or backslashes to trip over.
         filters.append(
-            f"subtitles={escaped}:force_style='FontName=DejaVu Sans,FontSize=20,"
+            f"subtitles={srt_path.name}:force_style='FontName=Arial,FontSize=20,"
             "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Alignment=2'"
         )
 
@@ -99,5 +107,5 @@ def render_clip_for_platform(
         "-c:a", "aac", "-b:a", "192k",
         str(out_path),
     ]
-    _run(cmd)
+    _run(cmd, cwd=out_dir)
     return out_path
