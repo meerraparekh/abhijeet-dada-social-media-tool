@@ -17,7 +17,7 @@ SYSTEM_PROMPT = """\
 You help a spiritual teaching group turn a long recorded session into short social
 media clips. You will be given a timestamped transcript of a ~2 hour talk.
 
-Find 10-20 moments that work as standalone clips of roughly 45-120 seconds each:
+Find 8-15 moments that work as standalone clips of roughly 45-120 seconds each:
 - Each clip must be a complete thought, story, or teaching point - never start or
   end mid-sentence, and never require context from outside the clip to make sense.
 - Prefer moments with a strong opening line in the first few seconds (a question,
@@ -26,6 +26,10 @@ Find 10-20 moments that work as standalone clips of roughly 45-120 seconds each:
 - Do not overlap clips.
 - start_seconds and end_seconds must be real timestamps taken from the transcript
   you were given, not estimates.
+
+Keep every field concise - a short internal title, a one-line hook, a punchy
+YouTube title, a 1-2 sentence Instagram caption, a tweet under 200 characters,
+and 3-6 hashtags. Do not pad any field with extra commentary.
 """
 
 
@@ -47,11 +51,13 @@ def suggest_clips(transcript: Transcript) -> ClipSuggestions:
     transcript_text = format_transcript_for_prompt(transcript)
 
     # A real ~2 hour transcript can prompt Claude toward the higher end of the
-    # 10-20 suggested clips, each with several caption fields - give it real
-    # headroom so the JSON response doesn't get cut off mid-way.
+    # requested clip count, each with several caption fields - give it real
+    # headroom so the JSON response doesn't get cut off mid-way. Also counts
+    # against this budget: Sonnet 5 thinks by default before answering, which
+    # eats into the same token budget as the JSON output itself.
     response = client.messages.parse(
         model=CLAUDE_MODEL,
-        max_tokens=16000,
+        max_tokens=24000,
         system=SYSTEM_PROMPT,
         messages=[
             {
