@@ -94,7 +94,7 @@ function renderClipCard(session, clip) {
   const platformLabels = { youtube: "YouTube", instagram_reel: "Instagram Reel", twitter: "Twitter/X" };
   const platformCheckboxes = Object.keys(platformLabels)
     .map(
-      (p) => `<label><input type="checkbox" class="platform-cb" value="${p}" ${clip.rendered_files[p] ? "checked disabled" : ""}/> ${platformLabels[p]}</label>`
+      (p) => `<label><input type="checkbox" class="platform-cb" value="${p}" ${clip.rendered_files[p] ? "checked" : ""}/> ${platformLabels[p]}${clip.rendered_files[p] ? " <span class='progress-note'>(rendered - re-check to redo)</span>" : ""}</label>`
     )
     .join("");
 
@@ -172,7 +172,7 @@ function renderClipCard(session, clip) {
   });
 
   card.querySelector(".render-btn").onclick = async () => {
-    const platforms = [...card.querySelectorAll(".platform-cb:checked:not(:disabled)")].map((c) => c.value);
+    const platforms = [...card.querySelectorAll(".platform-cb:checked")].map((c) => c.value);
     if (!platforms.length) { alert("Pick at least one platform"); return; }
     const note = card.querySelector(".render-note");
     note.textContent = "Rendering...";
