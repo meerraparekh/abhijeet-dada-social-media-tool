@@ -140,7 +140,7 @@ def test_full_pipeline(client):
     # 5. render for all three platforms - this is real ffmpeg, not faked
     res = client.post(
         f"/api/sessions/{session_id}/clips/{clip['id']}/render",
-        json=["youtube", "instagram_reel", "twitter"],
+        json={"platforms": ["youtube", "instagram_reel", "twitter"]},
     )
     job = _wait_for_job(client, res.json()["job_id"], timeout=120)
     assert job["state"] == "done", job

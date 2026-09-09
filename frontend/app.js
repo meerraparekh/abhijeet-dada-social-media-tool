@@ -143,6 +143,7 @@ function renderClipCard(session, clip) {
     </div>
     <div class="row" style="align-items:center">
       <div class="platform-row">${platformCheckboxes}</div>
+      <label><input type="checkbox" class="remove-silence-cb" checked /> Remove silence/gaps</label>
       <button class="render-btn">Render selected</button>
       <div class="download-links">${downloads}</div>
     </div>
@@ -182,12 +183,13 @@ function renderClipCard(session, clip) {
   card.querySelector(".render-btn").onclick = async () => {
     const platforms = [...card.querySelectorAll(".platform-cb:checked")].map((c) => c.value);
     if (!platforms.length) { alert("Pick at least one platform"); return; }
+    const removeSilence = card.querySelector(".remove-silence-cb").checked;
     const note = card.querySelector(".render-note");
     note.textContent = "Rendering...";
     const { job_id } = await api(`/api/sessions/${session.id}/clips/${clip.id}/render`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(platforms),
+      body: JSON.stringify({ platforms, remove_silence: removeSilence }),
     });
     pollJob(job_id, (job) => {
       note.textContent = job.state === "running" ? job.progress || "rendering..." : "";

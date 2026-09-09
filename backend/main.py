@@ -182,8 +182,13 @@ def delete_clip(session_id: str, clip_id: str) -> dict:
 
 # ---------- rendering ----------
 
+class RenderRequest(BaseModel):
+    platforms: List[str]
+    remove_silence: bool = True
+
+
 @app.post("/api/sessions/{session_id}/clips/{clip_id}/render")
-def render_clip(session_id: str, clip_id: str, platforms: List[str]) -> dict:
+def render_clip(session_id: str, clip_id: str, req: RenderRequest) -> dict:
     session = store.load(session_id)
     if not session or not session.video_filename:
         raise HTTPException(404, "session or video not found")
@@ -201,9 +206,11 @@ def render_clip(session_id: str, clip_id: str, platforms: List[str]) -> dict:
     def work(progress_cb):
         s = store.load(session_id)
         c = next(x for x in s.clips if x.id == clip_id)
-        for platform in platforms:
+        for platform in req.platforms:
             progress_cb(f"rendering {platform}")
-            out_path = clipper.render_clip_for_platform(raw_video_path, c, platform, words, clips_dir)
+            out_path = clipper.render_clip_for_platform(
+                raw_video_path, c, platform, words, clips_dir, remove_silence=req.remove_silence
+            )
             c.rendered_files[platform] = str(out_path.relative_to(store.session_dir(session_id)))
         c.status = "done"
         store.save(s)
