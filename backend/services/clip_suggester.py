@@ -117,12 +117,15 @@ def suggest_clips(transcript: Transcript, max_attempts: int = 3) -> ClipSuggesti
             # give it real headroom so the JSON response doesn't get cut off
             # mid-way. Also counts against this budget: Sonnet 5 thinks by
             # default before answering, which eats into the same token budget
-            # as the JSON output itself. A max_tokens this high requires
-            # streaming - the SDK refuses a plain (non-streaming) request it
-            # estimates could run past ~10 minutes.
+            # as the JSON output itself - this is closer to an extraction/
+            # classification task than a hard reasoning problem, so cap effort
+            # to keep thinking from eating too much of that budget. A
+            # max_tokens this high requires streaming - the SDK refuses a
+            # plain (non-streaming) request it estimates could run past ~10
+            # minutes.
             with client.messages.stream(
                 model=CLAUDE_MODEL,
-                max_tokens=24000,
+                max_tokens=32000,
                 system=SYSTEM_PROMPT,
                 messages=[
                     {
@@ -131,7 +134,8 @@ def suggest_clips(transcript: Transcript, max_attempts: int = 3) -> ClipSuggesti
                     }
                 ],
                 output_config={
-                    "format": {"type": "json_schema", "schema": _CLIP_SUGGESTIONS_SCHEMA}
+                    "effort": "low",
+                    "format": {"type": "json_schema", "schema": _CLIP_SUGGESTIONS_SCHEMA},
                 },
             ) as stream:
                 response = stream.get_final_message()
