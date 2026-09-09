@@ -52,6 +52,9 @@ async function renderMain() {
     <div class="action-row">
       <button id="transcribeBtn" ${session.transcript ? "disabled" : ""}>Transcribe</button>
       <button id="suggestBtn" ${!session.transcript || session.clips.length ? "disabled" : ""}>Suggest clips</button>
+      <button id="translateBtn" ${!session.transcript ? "disabled" : ""}>
+        ${session.transcript && session.transcript.caption_words_en && session.transcript.caption_words_en.length ? "Re-translate captions" : "Translate captions (English)"}
+      </button>
       ${session.transcript ? `<a href="/api/sessions/${session.id}/transcript.srt">Download transcript (.srt)</a>` : ""}
       <span id="jobNote" class="progress-note"></span>
     </div>
@@ -61,6 +64,7 @@ async function renderMain() {
   document.getElementById("deleteSessionBtn").onclick = () => deleteSession(session.id);
   document.getElementById("transcribeBtn").onclick = () => runJob(`/api/sessions/${session.id}/transcribe`, "POST");
   document.getElementById("suggestBtn").onclick = () => runJob(`/api/sessions/${session.id}/suggest-clips`, "POST");
+  document.getElementById("translateBtn").onclick = () => runJob(`/api/sessions/${session.id}/translate-captions`, "POST");
 
   renderClips(session);
 }

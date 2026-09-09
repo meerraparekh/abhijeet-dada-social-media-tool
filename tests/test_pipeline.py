@@ -1,10 +1,12 @@
-"""End-to-end smoke test for the upload -> transcribe -> suggest -> render pipeline.
+"""End-to-end smoke test for the upload -> transcribe -> translate -> suggest
+-> render pipeline.
 
 Runs against a synthetic test video (see scripts/make_test_clip.sh) and fakes
-the two steps that talk to the network (Whisper's model download, and the
-Claude API call) so this test works offline. It still exercises every other
-line: FastAPI routes, the background job runner, the JSON session store, and
-real ffmpeg cutting/cropping/caption-burning.
+the steps that talk to the network (Whisper's model download, and the two
+Claude API calls - clip suggestion and caption translation) so this test
+works offline. It still exercises every other line: FastAPI routes, the
+background job runner, the JSON session store, and real ffmpeg cutting/
+cropping/caption-burning.
 
 Run with: SATSANG_TEST_VIDEO=/path/to/test_session.mp4 pytest tests/test_pipeline.py -v
 """
@@ -77,8 +79,12 @@ def client(tmp_path, monkeypatch):
             ]
         )
 
+    def fake_translate_segments(transcript):
+        return [f"[EN] {seg.text}" for seg in transcript.segments]
+
     monkeypatch.setattr(main_module.transcribe, "transcribe", fake_transcribe)
     monkeypatch.setattr(main_module.clip_suggester, "suggest_clips", fake_suggest)
+    monkeypatch.setattr(main_module.translator, "translate_segments", fake_translate_segments)
 
     from fastapi.testclient import TestClient
 
@@ -118,7 +124,20 @@ def test_full_pipeline(client):
     assert session["status"] == "transcribed"
     assert len(session["transcript"]["segments"]) == 2
 
-    # 3. suggest clips (faked)
+    # 3. translate captions to English (faked translation call, real interpolation logic)
+    res = client.post(f"/api/sessions/{session_id}/translate-captions")
+    job = _wait_for_job(client, res.json()["job_id"])
+    assert job["state"] == "done", job
+
+    session = client.get(f"/api/sessions/{session_id}").json()
+    caption_words_en = session["transcript"]["caption_words_en"]
+    assert len(caption_words_en) > 0
+    # fake_translate_segments prefixed each of the 2 segments with "[EN]" -
+    # confirms build_english_caption_words really split per-segment translations
+    # into individual timed words rather than treating each segment as one word.
+    assert sum(1 for w in caption_words_en if w["word"].strip() == "[EN]") == 2
+
+    # 4. suggest clips (faked)
     res = client.post(f"/api/sessions/{session_id}/suggest-clips")
     job = _wait_for_job(client, res.json()["job_id"])
     assert job["state"] == "done", job
@@ -129,7 +148,7 @@ def test_full_pipeline(client):
     assert clip["hook_en"] == "Welcome everyone to this evening's session."
     assert clip["hook_hi"] == "आज शाम सभी का स्वागत है।"
 
-    # 4. edit the clip via PATCH
+    # 5. edit the clip via PATCH
     res = client.patch(
         f"/api/sessions/{session_id}/clips/{clip['id']}",
         json={"assignee": "Priya", "status": "claimed"},
@@ -137,7 +156,7 @@ def test_full_pipeline(client):
     assert res.status_code == 200
     assert res.json()["assignee"] == "Priya"
 
-    # 5. render for all three platforms - this is real ffmpeg, not faked
+    # 6. render for all three platforms - this is real ffmpeg, not faked
     res = client.post(
         f"/api/sessions/{session_id}/clips/{clip['id']}/render",
         json={"platforms": ["youtube", "instagram_reel", "twitter"]},
@@ -171,12 +190,19 @@ def test_full_pipeline(client):
         w, h = map(int, probe.stdout.strip().split(","))
         assert (w, h) == expected_dims[platform], (platform, w, h)
 
+        # captioned platforms should have burned in the English translation,
+        # not the original transcript text
+        srt_path = out_path.with_suffix(".srt")
+        if platform in ("instagram_reel", "twitter"):
+            assert srt_path.exists()
+            assert "[EN]" in srt_path.read_text(encoding="utf-8")
+
         # download endpoint should serve the same file
         res = client.get(f"/api/sessions/{session_id}/clips/{clip['id']}/download/{platform}")
         assert res.status_code == 200
         assert len(res.content) == out_path.stat().st_size
 
-    # 6. delete the session cleans up
+    # 7. delete the session cleans up
     res = client.delete(f"/api/sessions/{session_id}")
     assert res.status_code == 200
     assert client.get(f"/api/sessions/{session_id}").status_code == 404

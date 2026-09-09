@@ -61,6 +61,10 @@ class Transcript(BaseModel):
     language: Optional[str] = None
     segments: List[TranscriptSegment] = Field(default_factory=list)
     words: List[TranscriptWord] = Field(default_factory=list)
+    # English translation, word-level (interpolated within each segment's real
+    # timing) - used for burned-in captions aimed at an English-speaking
+    # audience. Empty until the "Translate captions" step has been run.
+    caption_words_en: List[TranscriptWord] = Field(default_factory=list)
 
 
 class Clip(BaseModel):

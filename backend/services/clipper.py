@@ -178,10 +178,18 @@ def render_clip_for_platform(
     out_dir: Path,
     remove_silence: bool = True,
     max_gap_seconds: float = DEFAULT_MAX_GAP_SECONDS,
+    caption_words: Optional[List[TranscriptWord]] = None,
 ) -> Path:
+    """`words` (the original-language, real per-word timing from Whisper) is
+    used to decide where the gaps are - that's the accurate source for what's
+    actually silence. `caption_words` (defaults to `words` if not given) is
+    what actually gets burned in as on-screen text - pass the English
+    translation's interpolated word timing here to caption in English while
+    still cutting gaps based on the real Hindi speech timing."""
     preset = PRESETS[platform]
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{clip.id}_{platform}.mp4"
+    caption_words = caption_words if caption_words is not None else words
 
     keep_segments = (
         compute_keep_segments(words, clip.start_seconds, clip.end_seconds, max_gap=max_gap_seconds)
@@ -190,15 +198,15 @@ def render_clip_for_platform(
     )
 
     srt_path = None
-    if preset["burn_captions"] and words:
+    if preset["burn_captions"] and caption_words:
         srt_path = out_dir / f"{clip.id}_{platform}.srt"
         if len(keep_segments) > 1:
             remap, _ = build_time_remap(keep_segments)
             srt_text = _words_to_srt(
-                words, clip.start_seconds, clip.end_seconds, remap=remap, break_gap=max_gap_seconds
+                caption_words, clip.start_seconds, clip.end_seconds, remap=remap, break_gap=max_gap_seconds
             )
         else:
-            srt_text = _words_to_srt(words, clip.start_seconds, clip.end_seconds)
+            srt_text = _words_to_srt(caption_words, clip.start_seconds, clip.end_seconds)
         srt_path.write_text(srt_text, encoding="utf-8")
 
     # Reference the subtitle file by its bare filename and run ffmpeg with its

@@ -19,7 +19,7 @@ from pydantic import BaseModel
 import jobs
 import store
 from schemas import Clip, Session
-from services import clip_suggester, clipper, transcribe
+from services import clip_suggester, clipper, transcribe, translator
 
 app = FastAPI(title="Satsang Clips")
 
@@ -127,6 +127,26 @@ def suggest_clips(session_id: str) -> dict:
     return {"job_id": job.id}
 
 
+# ---------- caption translation ----------
+
+@app.post("/api/sessions/{session_id}/translate-captions")
+def translate_captions(session_id: str) -> dict:
+    session = store.load(session_id)
+    if not session or not session.transcript:
+        raise HTTPException(400, "session must be transcribed first")
+
+    def work(progress_cb):
+        progress_cb("asking Claude to translate the transcript to English")
+        translations = translator.translate_segments(session.transcript)
+        caption_words = translator.build_english_caption_words(session.transcript, translations)
+        s = store.load(session_id)
+        s.transcript.caption_words_en = caption_words
+        store.save(s)
+
+    job = jobs.start("translate_captions", session_id, work)
+    return {"job_id": job.id}
+
+
 # ---------- clip editing ----------
 
 class ClipUpdate(BaseModel):
@@ -198,6 +218,13 @@ def render_clip(session_id: str, clip_id: str, req: RenderRequest) -> dict:
 
     raw_video_path = store.session_dir(session_id) / session.video_filename
     words = session.transcript.words if session.transcript else []
+    # Burned-in captions are the English translation (for a wider audience);
+    # gap/silence detection still uses the original Hindi word timing, which
+    # is the accurate source for where the real speech is. Falls back to the
+    # Hindi words themselves if "Translate captions" hasn't been run yet.
+    caption_words = (
+        session.transcript.caption_words_en if session.transcript and session.transcript.caption_words_en else words
+    )
     clips_dir = store.session_dir(session_id) / "clips"
 
     clip.status = "rendering"
@@ -209,7 +236,8 @@ def render_clip(session_id: str, clip_id: str, req: RenderRequest) -> dict:
         for platform in req.platforms:
             progress_cb(f"rendering {platform}")
             out_path = clipper.render_clip_for_platform(
-                raw_video_path, c, platform, words, clips_dir, remove_silence=req.remove_silence
+                raw_video_path, c, platform, words, clips_dir,
+                remove_silence=req.remove_silence, caption_words=caption_words,
             )
             c.rendered_files[platform] = str(out_path.relative_to(store.session_dir(session_id)))
         c.status = "done"

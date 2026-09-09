@@ -81,17 +81,21 @@ nothing to install.
 
 ## What this costs
 
-Transcription and video rendering are free (local, open-source). The only
-paid step is asking Claude to suggest clips from the transcript:
+Transcription and video rendering are free (local, open-source). Two steps
+call the Claude API: suggesting clips (reads the transcript, picks moments),
+and translating the transcript to English for burned-in captions (reads and
+rewrites essentially the whole transcript, so it costs more per session):
 
 | | Per session (~2 hrs) | 5 sessions/month |
 |---|---|---|
-| Claude Sonnet 5 (default) | ≈ $0.10 | ≈ $0.50 |
-| Claude Opus 5 (higher quality, costs more) | ≈ $0.25 | ≈ $1.25 |
+| Suggest clips (Sonnet 5) | ≈ $0.10 | ≈ $0.50 |
+| Translate captions (Sonnet 5) | ≈ $0.30 | ≈ $1.50 |
+| **Total (Sonnet 5, default)** | **≈ $0.40** | **≈ $2.00** |
+| Total on Claude Opus 5 (higher quality, costs more) | ≈ $1.00 | ≈ $5.00 |
 
 Change the model via `SATSANG_CLAUDE_MODEL` (defaults to `claude-sonnet-5`).
 Even with a generous buffer for retries or longer sessions, expect well
-under $3/month.
+under $5/month on the default model.
 
 ## Storage note
 
