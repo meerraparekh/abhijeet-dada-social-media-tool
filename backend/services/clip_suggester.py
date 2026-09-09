@@ -46,9 +46,12 @@ def suggest_clips(transcript: Transcript) -> ClipSuggestions:
     client = anthropic.Anthropic()
     transcript_text = format_transcript_for_prompt(transcript)
 
+    # A real ~2 hour transcript can prompt Claude toward the higher end of the
+    # 10-20 suggested clips, each with several caption fields - give it real
+    # headroom so the JSON response doesn't get cut off mid-way.
     response = client.messages.parse(
         model=CLAUDE_MODEL,
-        max_tokens=8000,
+        max_tokens=16000,
         system=SYSTEM_PROMPT,
         messages=[
             {
@@ -58,4 +61,11 @@ def suggest_clips(transcript: Transcript) -> ClipSuggestions:
         ],
         output_format=ClipSuggestions,
     )
+    if response.parsed_output is None:
+        raise RuntimeError(
+            "Claude's response didn't finish as valid clip suggestions "
+            f"(stop_reason={response.stop_reason!r}). This usually means the "
+            "response was cut off before completing - try again, or if it "
+            "keeps happening, the transcript may need to be shortened."
+        )
     return response.parsed_output
