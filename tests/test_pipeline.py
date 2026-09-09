@@ -64,10 +64,14 @@ def client(tmp_path, monkeypatch):
                     start_seconds=0.0,
                     end_seconds=min(8.0, last_word_end),
                     title="Opening",
-                    hook="Welcome everyone to this evening's session.",
-                    youtube_title="A Talk on Stillness",
-                    instagram_caption="Tonight's opening thought 🙏",
-                    twitter_text="On the nature of stillness.",
+                    hook_hi="आज शाम सभी का स्वागत है।",
+                    hook_en="Welcome everyone to this evening's session.",
+                    youtube_title_hi="स्थिरता पर एक बात",
+                    youtube_title_en="A Talk on Stillness",
+                    instagram_caption_hi="आज रात का पहला विचार 🙏",
+                    instagram_caption_en="Tonight's opening thought 🙏",
+                    twitter_text_hi="स्थिरता की प्रकृति पर।",
+                    twitter_text_en="On the nature of stillness.",
                     hashtags=["satsang", "meditation"],
                 )
             ]
@@ -122,7 +126,8 @@ def test_full_pipeline(client):
     session = client.get(f"/api/sessions/{session_id}").json()
     assert len(session["clips"]) == 1
     clip = session["clips"][0]
-    assert clip["hook"] == "Welcome everyone to this evening's session."
+    assert clip["hook_en"] == "Welcome everyone to this evening's session."
+    assert clip["hook_hi"] == "आज शाम सभी का स्वागत है।"
 
     # 4. edit the clip via PATCH
     res = client.patch(

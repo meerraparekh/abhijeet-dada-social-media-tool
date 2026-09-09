@@ -125,13 +125,18 @@ function renderClipCard(session, clip) {
         <input type="text" class="f-assignee" value="${escapeAttr(clip.assignee)}" placeholder="who's editing this" />
       </div>
     </div>
-    <div class="hook">"${escapeHtml(clip.hook)}"</div>
+    <div class="hook">"${escapeHtml(clip.hook_hi)}"<br/>"${escapeHtml(clip.hook_en)}"</div>
     <div class="row">
-      <div><label>YouTube title</label><input type="text" class="f-yt-title" value="${escapeAttr(clip.youtube_title)}" /></div>
+      <div><label>YouTube title (Hindi)</label><input type="text" class="f-yt-title-hi" value="${escapeAttr(clip.youtube_title_hi)}" /></div>
+      <div><label>YouTube title (English)</label><input type="text" class="f-yt-title-en" value="${escapeAttr(clip.youtube_title_en)}" /></div>
     </div>
     <div class="row">
-      <div><label>Instagram caption</label><textarea class="f-ig-caption">${escapeHtml(clip.instagram_caption)}</textarea></div>
-      <div><label>Twitter/X text</label><textarea class="f-tw-text">${escapeHtml(clip.twitter_text)}</textarea></div>
+      <div><label>Instagram caption (Hindi)</label><textarea class="f-ig-caption-hi">${escapeHtml(clip.instagram_caption_hi)}</textarea></div>
+      <div><label>Instagram caption (English)</label><textarea class="f-ig-caption-en">${escapeHtml(clip.instagram_caption_en)}</textarea></div>
+    </div>
+    <div class="row">
+      <div><label>Twitter/X text (Hindi)</label><textarea class="f-tw-text-hi">${escapeHtml(clip.twitter_text_hi)}</textarea></div>
+      <div><label>Twitter/X text (English)</label><textarea class="f-tw-text-en">${escapeHtml(clip.twitter_text_en)}</textarea></div>
     </div>
     <div class="row">
       <div><label>Hashtags</label><input type="text" class="f-hashtags" value="${escapeAttr(clip.hashtags.join(", "))}" /></div>
@@ -156,9 +161,12 @@ function renderClipCard(session, clip) {
   card.querySelector(".f-end").onchange = (e) => save({ end_seconds: parseFloat(e.target.value) });
   card.querySelector(".f-status").onchange = (e) => save({ status: e.target.value });
   card.querySelector(".f-assignee").onchange = (e) => save({ assignee: e.target.value });
-  card.querySelector(".f-yt-title").onchange = (e) => save({ youtube_title: e.target.value });
-  card.querySelector(".f-ig-caption").onchange = (e) => save({ instagram_caption: e.target.value });
-  card.querySelector(".f-tw-text").onchange = (e) => save({ twitter_text: e.target.value });
+  card.querySelector(".f-yt-title-hi").onchange = (e) => save({ youtube_title_hi: e.target.value });
+  card.querySelector(".f-yt-title-en").onchange = (e) => save({ youtube_title_en: e.target.value });
+  card.querySelector(".f-ig-caption-hi").onchange = (e) => save({ instagram_caption_hi: e.target.value });
+  card.querySelector(".f-ig-caption-en").onchange = (e) => save({ instagram_caption_en: e.target.value });
+  card.querySelector(".f-tw-text-hi").onchange = (e) => save({ twitter_text_hi: e.target.value });
+  card.querySelector(".f-tw-text-en").onchange = (e) => save({ twitter_text_en: e.target.value });
   card.querySelector(".f-hashtags").onchange = (e) =>
     save({ hashtags: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) });
 

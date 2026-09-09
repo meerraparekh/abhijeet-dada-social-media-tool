@@ -33,20 +33,28 @@ _CLIP_SUGGESTIONS_SCHEMA = {
                     "start_seconds": {"type": "number"},
                     "end_seconds": {"type": "number"},
                     "title": {"type": "string"},
-                    "hook": {"type": "string"},
-                    "youtube_title": {"type": "string"},
-                    "instagram_caption": {"type": "string"},
-                    "twitter_text": {"type": "string"},
+                    "hook_hi": {"type": "string"},
+                    "hook_en": {"type": "string"},
+                    "youtube_title_hi": {"type": "string"},
+                    "youtube_title_en": {"type": "string"},
+                    "instagram_caption_hi": {"type": "string"},
+                    "instagram_caption_en": {"type": "string"},
+                    "twitter_text_hi": {"type": "string"},
+                    "twitter_text_en": {"type": "string"},
                     "hashtags": {"type": "array", "items": {"type": "string"}},
                 },
                 "required": [
                     "start_seconds",
                     "end_seconds",
                     "title",
-                    "hook",
-                    "youtube_title",
-                    "instagram_caption",
-                    "twitter_text",
+                    "hook_hi",
+                    "hook_en",
+                    "youtube_title_hi",
+                    "youtube_title_en",
+                    "instagram_caption_hi",
+                    "instagram_caption_en",
+                    "twitter_text_hi",
+                    "twitter_text_en",
                     "hashtags",
                 ],
                 "additionalProperties": False,
@@ -59,7 +67,8 @@ _CLIP_SUGGESTIONS_SCHEMA = {
 
 SYSTEM_PROMPT = """\
 You help a spiritual teaching group turn a long recorded session into short social
-media clips. You will be given a timestamped transcript of a ~2 hour talk.
+media clips. The talk itself is mostly in Hindi (with occasional English words),
+and you will be given a timestamped transcript of a ~2 hour session in that mix.
 
 Find 8-15 moments that work as standalone clips of roughly 45-120 seconds each:
 - Each clip must be a complete thought, story, or teaching point - never start or
@@ -71,9 +80,19 @@ Find 8-15 moments that work as standalone clips of roughly 45-120 seconds each:
 - start_seconds and end_seconds must be real timestamps taken from the transcript
   you were given, not estimates.
 
+The on-screen captions burned into the video stay in Hindi (matching the spoken
+audio) and are handled separately - you are not writing those. What you ARE
+writing is the text that goes in the post itself (title/caption/tweet), and
+that's wanted in BOTH Hindi and English so either can be used depending on the
+audience: for each of hook, youtube_title, instagram_caption, and twitter_text,
+provide an "_hi" version (natural Hindi, not a stiff literal translation) and
+an "_en" version (a natural English rendering of the same content, not a
+word-for-word translation).
+
 Keep every field concise - a short internal title, a one-line hook, a punchy
 YouTube title, a 1-2 sentence Instagram caption, a tweet under 200 characters,
-and 3-6 hashtags. Do not pad any field with extra commentary.
+and 3-6 hashtags (hashtags in English/roman script, as is conventional even
+for Hindi-language posts). Do not pad any field with extra commentary.
 """
 
 
