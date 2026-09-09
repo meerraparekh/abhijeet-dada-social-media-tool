@@ -32,14 +32,16 @@ def create(session: Session) -> Session:
 
 def save(session: Session) -> None:
     with _lock:
-        _session_file(session.id).write_text(session.model_dump_json(indent=2))
+        _session_file(session.id).write_text(
+            session.model_dump_json(indent=2), encoding="utf-8"
+        )
 
 
 def load(session_id: str) -> Optional[Session]:
     path = _session_file(session_id)
     if not path.exists():
         return None
-    return Session.model_validate_json(path.read_text())
+    return Session.model_validate_json(path.read_text(encoding="utf-8"))
 
 
 def list_all() -> List[Session]:
@@ -47,7 +49,7 @@ def list_all() -> List[Session]:
     for d in sorted(SESSIONS_DIR.iterdir(), reverse=True):
         f = d / "session.json"
         if f.exists():
-            out.append(Session.model_validate_json(f.read_text()))
+            out.append(Session.model_validate_json(f.read_text(encoding="utf-8")))
     return out
 
 
