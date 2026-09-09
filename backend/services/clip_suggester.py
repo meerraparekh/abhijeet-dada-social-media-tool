@@ -9,8 +9,10 @@ task like this - expect well under $0.15 per session.
 from __future__ import annotations
 
 import json
+import time
 
 import anthropic
+import httpx2
 import pydantic
 
 from config import CLAUDE_MODEL
@@ -88,30 +90,64 @@ def _mmss(seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
-def suggest_clips(transcript: Transcript) -> ClipSuggestions:
+# Errors that plausibly mean "the connection dropped mid-stream" rather than
+# "the request itself is invalid" - worth a couple of automatic retries
+# rather than surfacing a scary traceback for what's often a one-off network
+# hiccup (flaky wifi, a VPN reconnect, a proxy that doesn't love long-lived
+# streaming connections).
+_TRANSIENT_NETWORK_ERRORS = (
+    anthropic.APIConnectionError,
+    anthropic.APITimeoutError,
+    httpx2.RemoteProtocolError,
+    httpx2.ReadError,
+    httpx2.ConnectError,
+    httpx2.ConnectTimeout,
+)
+
+
+def suggest_clips(transcript: Transcript, max_attempts: int = 3) -> ClipSuggestions:
     client = anthropic.Anthropic()
     transcript_text = format_transcript_for_prompt(transcript)
 
-    # A real ~2 hour transcript can prompt Claude toward the higher end of the
-    # requested clip count, each with several caption fields - give it real
-    # headroom so the JSON response doesn't get cut off mid-way. Also counts
-    # against this budget: Sonnet 5 thinks by default before answering, which
-    # eats into the same token budget as the JSON output itself. A max_tokens
-    # this high requires streaming - the SDK refuses a plain (non-streaming)
-    # request it estimates could run past ~10 minutes.
-    with client.messages.stream(
-        model=CLAUDE_MODEL,
-        max_tokens=24000,
-        system=SYSTEM_PROMPT,
-        messages=[
-            {
-                "role": "user",
-                "content": f"Timestamped transcript:\n\n{transcript_text}",
-            }
-        ],
-        output_config={"format": {"type": "json_schema", "schema": _CLIP_SUGGESTIONS_SCHEMA}},
-    ) as stream:
-        response = stream.get_final_message()
+    response = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            # A real ~2 hour transcript can prompt Claude toward the higher end
+            # of the requested clip count, each with several caption fields -
+            # give it real headroom so the JSON response doesn't get cut off
+            # mid-way. Also counts against this budget: Sonnet 5 thinks by
+            # default before answering, which eats into the same token budget
+            # as the JSON output itself. A max_tokens this high requires
+            # streaming - the SDK refuses a plain (non-streaming) request it
+            # estimates could run past ~10 minutes.
+            with client.messages.stream(
+                model=CLAUDE_MODEL,
+                max_tokens=24000,
+                system=SYSTEM_PROMPT,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": f"Timestamped transcript:\n\n{transcript_text}",
+                    }
+                ],
+                output_config={
+                    "format": {"type": "json_schema", "schema": _CLIP_SUGGESTIONS_SCHEMA}
+                },
+            ) as stream:
+                response = stream.get_final_message()
+            break
+        except _TRANSIENT_NETWORK_ERRORS as exc:
+            if attempt == max_attempts:
+                raise RuntimeError(
+                    f"Lost connection to Claude {max_attempts} times in a row "
+                    f"while waiting for clip suggestions ({exc!r}). This "
+                    "usually means something on this network is dropping "
+                    "long-running connections (flaky wifi, VPN, or a "
+                    "firewall/antivirus proxy) rather than a problem with the "
+                    "request itself - try a different network if it keeps "
+                    "happening."
+                ) from exc
+            time.sleep(3 * attempt)
 
     text = next((b.text for b in response.content if b.type == "text"), None)
     if text is None:
