@@ -8,10 +8,52 @@ task like this - expect well under $0.15 per session.
 """
 from __future__ import annotations
 
+import json
+
 import anthropic
+import pydantic
 
 from config import CLAUDE_MODEL
 from schemas import ClipSuggestions, Transcript
+
+# Hand-written mirror of the ClipSuggestions/ClipSuggestion schema for the
+# Messages API's structured-output format. Written out explicitly (rather
+# than derived from the Pydantic model's own .model_json_schema()) since the
+# API expects a single flat schema, not one with $ref/$defs indirection.
+_CLIP_SUGGESTIONS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "clips": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "start_seconds": {"type": "number"},
+                    "end_seconds": {"type": "number"},
+                    "title": {"type": "string"},
+                    "hook": {"type": "string"},
+                    "youtube_title": {"type": "string"},
+                    "instagram_caption": {"type": "string"},
+                    "twitter_text": {"type": "string"},
+                    "hashtags": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": [
+                    "start_seconds",
+                    "end_seconds",
+                    "title",
+                    "hook",
+                    "youtube_title",
+                    "instagram_caption",
+                    "twitter_text",
+                    "hashtags",
+                ],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["clips"],
+    "additionalProperties": False,
+}
 
 SYSTEM_PROMPT = """\
 You help a spiritual teaching group turn a long recorded session into short social
@@ -54,8 +96,10 @@ def suggest_clips(transcript: Transcript) -> ClipSuggestions:
     # requested clip count, each with several caption fields - give it real
     # headroom so the JSON response doesn't get cut off mid-way. Also counts
     # against this budget: Sonnet 5 thinks by default before answering, which
-    # eats into the same token budget as the JSON output itself.
-    response = client.messages.parse(
+    # eats into the same token budget as the JSON output itself. A max_tokens
+    # this high requires streaming - the SDK refuses a plain (non-streaming)
+    # request it estimates could run past ~10 minutes.
+    with client.messages.stream(
         model=CLAUDE_MODEL,
         max_tokens=24000,
         system=SYSTEM_PROMPT,
@@ -65,13 +109,22 @@ def suggest_clips(transcript: Transcript) -> ClipSuggestions:
                 "content": f"Timestamped transcript:\n\n{transcript_text}",
             }
         ],
-        output_format=ClipSuggestions,
-    )
-    if response.parsed_output is None:
+        output_config={"format": {"type": "json_schema", "schema": _CLIP_SUGGESTIONS_SCHEMA}},
+    ) as stream:
+        response = stream.get_final_message()
+
+    text = next((b.text for b in response.content if b.type == "text"), None)
+    if text is None:
         raise RuntimeError(
-            "Claude's response didn't finish as valid clip suggestions "
-            f"(stop_reason={response.stop_reason!r}). This usually means the "
-            "response was cut off before completing - try again, or if it "
-            "keeps happening, the transcript may need to be shortened."
+            "Claude's response didn't include any clip suggestions text "
+            f"(stop_reason={response.stop_reason!r})."
         )
-    return response.parsed_output
+    try:
+        return ClipSuggestions.model_validate_json(text)
+    except (json.JSONDecodeError, pydantic.ValidationError) as exc:
+        raise RuntimeError(
+            "Claude's response wasn't valid clip suggestions "
+            f"(stop_reason={response.stop_reason!r}): {exc}. This usually "
+            "means the response was cut off before completing - try again, "
+            "or if it keeps happening, the transcript may need to be shortened."
+        ) from exc
