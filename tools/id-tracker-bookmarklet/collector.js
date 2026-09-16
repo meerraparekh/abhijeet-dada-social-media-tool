@@ -568,20 +568,28 @@
         persist();
         renderSetup();
       }, '#495057'));
-      nextRow.appendChild(button('🧪 Test Next click', function () {
+      nextRow.appendChild(button('🧪 Test Next click (waits up to 10s)', function () {
         var el = document.querySelector(state.cfg.nextSelector);
         if (!el) { alert('Next button not found on this page.'); return; }
         if (isDisabledEl(el)) { alert('Next button looks disabled right now — nothing to test (maybe this is the last page).'); return; }
-        var before = pageSignature();
+        var beforeIds = parseCurrentPage().rows.map(function (r) { return r.id; });
+        var before = beforeIds.join('|');
         fireClick(el);
-        setTimeout(function () {
-          var after = pageSignature();
-          if (after && after !== before) {
-            alert('✅ It worked — rows changed after clicking Next. Auto-collect should work.');
+        waitForPageChange(before, 10000).then(function (changed) {
+          var afterIds = parseCurrentPage().rows.map(function (r) { return r.id; });
+          if (changed) {
+            alert('✅ It worked — rows changed after clicking Next. Auto-collect should work now.\n\nBefore: ' + beforeIds.slice(0, 3).join(', ') + '…\nAfter: ' + afterIds.slice(0, 3).join(', ') + '…');
           } else {
-            alert('⚠ Rows did NOT change 3 seconds after clicking Next. Either it needs more time (try again / Auto-collect waits up to 10s and retries once), or the click isn\'t reaching the real button — try re-picking a slightly different spot (e.g. the arrow icon itself, or its outer button wrapper).');
+            alert('⚠ Rows did NOT change within 10s of clicking Next (this is the same wait Auto-collect uses).\n\n'
+              + 'Before: ' + (beforeIds.slice(0, 3).join(', ') || '(none read)') + '…\n'
+              + 'After:  ' + (afterIds.slice(0, 3).join(', ') || '(none read)') + '…\n\n'
+              + (afterIds.length === 0
+                ? 'The ID/Brand selectors found nothing at all just now — they may only match while this exact page is showing. Try re-picking ID and Brand on whichever page is showing now.'
+                : (before === afterIds.join('|')
+                  ? 'Same IDs read before and after — if the page visibly changed, the picked ID field might be matching something that stays constant (e.g. a header/label) instead of the row values. Try re-picking ID.'
+                  : 'Rows were read both times but look unchanged — if you saw the page visibly change, this may just need more time; if it looked the same, this Next click may be re-showing the same page.')));
           }
-        }, 3000);
+        });
       }, '#495057'));
     }
     body.appendChild(nextRow);
