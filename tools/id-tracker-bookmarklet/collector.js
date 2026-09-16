@@ -37,7 +37,7 @@
   var state = {
     rows: loadJSON(ROWS_KEY, {}),        // { id: { id, brand, vendor, category } }
     vendorMap: loadJSON(MAP_KEY, {}),    // { brandLower: { brand, vendor, category } } — fallback per brand
-    cfg: loadJSON(CFG_KEY, { idSelector: '', brandSelector: '', vendorSelector: '', categorySelector: '' })
+    cfg: loadJSON(CFG_KEY, { idSelector: '', brandSelector: '', vendorSelector: '', categorySelector: '', skusSelector: '', nextSelector: '' })
   };
 
   function persist() {
@@ -105,6 +105,32 @@
     return nthChildPath(el);
   }
 
+  // For a single element (like a "Next" button) rather than a repeated row field.
+  function pickUniqueSelector(el) {
+    var candidates = selectorCandidates(el);
+    for (var i = 0; i < candidates.length; i++) {
+      var sel = candidates[i];
+      try {
+        var matches = document.querySelectorAll(sel);
+        if (matches.length === 1 && matches[0] === el) return sel;
+      } catch (e) { /* invalid selector, skip */ }
+    }
+    return nthChildPath(el);
+  }
+
+  function isDisabledEl(el) {
+    if (!el) return true;
+    if (el.disabled) return true;
+    var aria = el.getAttribute && el.getAttribute('aria-disabled');
+    if (aria === 'true') return true;
+    if (el.className && typeof el.className === 'string' && /disabled/i.test(el.className)) return true;
+    try {
+      var style = window.getComputedStyle(el);
+      if (style && (style.pointerEvents === 'none' || parseFloat(style.opacity) === 0)) return true;
+    } catch (e) { /* ignore */ }
+    return false;
+  }
+
   function textOf(el) {
     return el.textContent.replace(/\s+/g, ' ').trim();
   }
@@ -169,6 +195,59 @@
     });
     persist();
     return { added: added, skippedBlank: skippedBlank, counts: parsed.counts, configured: parsed.configured };
+  }
+
+  // ---------- auto-paginate (only works if "Next" advances without a full page reload) ----------
+
+  var autoStopRequested = false;
+
+  function pageSignature() {
+    return parseCurrentPage().rows.map(function (r) { return r.id; }).join('|');
+  }
+
+  function sleep(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+
+  function waitForPageChange(beforeSig, timeoutMs) {
+    return new Promise(function (resolve) {
+      var start = Date.now();
+      (function poll() {
+        if (autoStopRequested) { resolve(false); return; }
+        var nowSig = pageSignature();
+        if (nowSig && nowSig !== beforeSig) { resolve(true); return; }
+        if (Date.now() - start > timeoutMs) { resolve(false); return; }
+        setTimeout(poll, 250);
+      })();
+    });
+  }
+
+  // Runs until Next is missing/disabled, the page stops changing, or Stop is clicked.
+  // onProgress(pageNum, totalCollected) is called after each page.
+  async function autoCollectAllPages(onProgress) {
+    autoStopRequested = false;
+    var pageNum = 1;
+    collectCurrentPage();
+    onProgress(pageNum, Object.keys(state.rows).length, null);
+    var maxPages = 500;
+    while (!autoStopRequested && pageNum < maxPages) {
+      var nextEl = document.querySelector(state.cfg.nextSelector);
+      if (!nextEl || isDisabledEl(nextEl)) {
+        return { stoppedReason: 'end', pages: pageNum };
+      }
+      var beforeSig = pageSignature();
+      nextEl.click();
+      var changed = await waitForPageChange(beforeSig, 8000);
+      if (autoStopRequested) return { stoppedReason: 'user', pages: pageNum };
+      if (!changed) {
+        return { stoppedReason: 'no-change', pages: pageNum };
+      }
+      pageNum++;
+      collectCurrentPage();
+      onProgress(pageNum, Object.keys(state.rows).length, null);
+      await sleep(250);
+    }
+    return { stoppedReason: autoStopRequested ? 'user' : 'max-pages', pages: pageNum };
   }
 
   function brandKey(b) { return b.trim().toLowerCase(); }
@@ -290,6 +369,11 @@
     body.appendChild(button('🎯 Setup fields', renderSetup, '#495057'));
     body.appendChild(document.createElement('br'));
 
+    if (configured && state.cfg.nextSelector) {
+      body.appendChild(button('▶ Auto-collect all pages', renderAutoRun, '#0ca678'));
+      body.appendChild(document.createElement('br'));
+    }
+
     body.appendChild(button('📋 Finish & copy for Sheet', renderFinish, '#2f9e44'));
     body.appendChild(button('🏷 Vendor/Category list', renderVendorList, '#495057'));
     body.appendChild(document.createElement('br'));
@@ -304,7 +388,9 @@
 
     var hint = document.createElement('div');
     hint.style.cssText = 'margin-top:10px;font-size:11px;color:#aaa;';
-    hint.textContent = 'Go to the next page in the tool, then click this bookmarklet again and hit "Collect this page".';
+    hint.textContent = state.cfg.nextSelector
+      ? 'Or go page-by-page yourself: click Next in the tool, click this bookmarklet again, and hit "Collect this page".'
+      : 'Go to the next page in the tool, then click this bookmarklet again and hit "Collect this page". (Pick a "Next" button in Setup to enable one-click Auto-collect instead.)';
     body.appendChild(hint);
   }
 
@@ -346,6 +432,46 @@
 
   function stopPicking() {
     if (pickCleanup) pickCleanup();
+  }
+
+  function renderAutoRun() {
+    stopPicking();
+    autoStopRequested = false;
+    body.innerHTML = '';
+    var msg = document.createElement('div');
+    msg.style.cssText = 'margin-bottom:8px;white-space:pre-line;';
+    msg.textContent = '⏳ Collecting page 1… (' + Object.keys(state.rows).length + ' unique ID(s) so far)';
+    body.appendChild(msg);
+    var stopBtn = button('⏹ Stop', function () { autoStopRequested = true; }, '#c92a2a');
+    body.appendChild(stopBtn);
+    var note = document.createElement('div');
+    note.style.cssText = 'margin-top:8px;font-size:11px;color:#aaa;';
+    note.textContent = 'If the tool reloads the whole page to go to the next set, this will only get page 1 — use "Collect this page" manually instead in that case.';
+    body.appendChild(note);
+
+    autoCollectAllPages(function (pageNum, total) {
+      msg.textContent = '⏳ Collecting page ' + pageNum + '… (' + total + ' unique ID(s) so far)';
+    }).then(function (result) {
+      body.innerHTML = '';
+      var done = document.createElement('div');
+      done.style.marginBottom = '6px';
+      var total = Object.keys(state.rows).length;
+      var reasonText = {
+        'end': '✅ Done — reached the last page.',
+        'user': '⏹ Stopped.',
+        'no-change': '⚠ Stopped — the page didn\'t change after clicking Next (may be the last page, or it needs more time).',
+        'max-pages': '⚠ Stopped — hit the safety limit of 500 pages.'
+      }[result.stoppedReason] || 'Done.';
+      done.textContent = reasonText + ' Collected ' + total + ' unique ID(s) across ' + result.pages + ' page(s).';
+      body.appendChild(done);
+      body.appendChild(button('← Back', renderMain, '#495057'));
+    }).catch(function (e) {
+      body.innerHTML = '';
+      var err = document.createElement('div');
+      err.textContent = '⚠ Auto-collect stopped due to an error: ' + (e && e.message ? e.message : e);
+      body.appendChild(err);
+      body.appendChild(button('← Back', renderMain, '#495057'));
+    });
   }
 
   var FIELD_LABELS = { id: 'ID', brand: 'Brand', vendor: 'Vendor', category: 'Category', skus: 'No. of SKUs' };
@@ -390,6 +516,35 @@
       }
       body.appendChild(row);
     });
+
+    var nextStatus = document.createElement('div');
+    nextStatus.style.cssText = 'margin-top:14px;margin-bottom:4px;border-top:1px solid #333;padding-top:10px;';
+    var nextOk = state.cfg.nextSelector ? document.querySelector(state.cfg.nextSelector) : null;
+    var nextInfo = state.cfg.nextSelector
+      ? (nextOk ? ('✅ set (' + (isDisabledEl(nextOk) ? 'currently disabled — normal on the last page' : 'found, enabled') + ')') : '⚠ set, but not found on this page')
+      : '❌ not set';
+    nextStatus.textContent = 'Next button (optional, enables Auto-collect): ' + nextInfo;
+    body.appendChild(nextStatus);
+    var nextRow = document.createElement('div');
+    nextRow.appendChild(button('🎯 Pick Next button', function () {
+      body.innerHTML = '';
+      var msg = document.createElement('div');
+      msg.textContent = 'Now click the "Next" button/link that moves to the next set of rows (Esc to cancel)...';
+      body.appendChild(msg);
+      startPicking('next', function (el) {
+        state.cfg.nextSelector = pickUniqueSelector(el);
+        persist();
+        renderSetup();
+      });
+    }));
+    if (state.cfg.nextSelector) {
+      nextRow.appendChild(button('Clear', function () {
+        state.cfg.nextSelector = '';
+        persist();
+        renderSetup();
+      }, '#495057'));
+    }
+    body.appendChild(nextRow);
 
     body.appendChild(document.createElement('br'));
     body.appendChild(button('👁 Preview parsed rows', function () {

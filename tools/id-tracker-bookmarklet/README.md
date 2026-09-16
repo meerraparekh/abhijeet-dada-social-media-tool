@@ -14,8 +14,11 @@ What it does:
 - Can optionally also read "No. of SKUs" (e.g. the `3` in "Pending
   Variants (3)") if you choose to pick that field too — otherwise that
   column stays manual, same as today.
-- Remembers everything you've collected as you click "Next" and move
-  through pages, and removes duplicates automatically.
+- Remembers everything you've collected as you move through pages, and
+  removes duplicates automatically.
+- Can optionally click through every page for you (see **Auto-collect**
+  below) if you also pick the "Next" button once — no manual clicking
+  through pages required.
 - Drops rows with a blank Brand (same as your current Excel filter step).
 - If a page doesn't show Vendor/Category (or you skip setting those up),
   it falls back to a remembered Vendor + Category per brand: the first
@@ -58,15 +61,22 @@ do this once — it keeps working after this.
      leave it unset. Vendor/Category then fall back to asking you once
      per brand at the end (see step 8); No. of SKUs simply stays out of
      the pasted block if left unset.
+   - There's also a **🎯 Pick Next button** option at the bottom (optional)
+     — see **Auto-collect all pages** below for what it unlocks.
    - Click **👁 Preview parsed rows** to confirm it read the first few rows
      correctly, then **← Back**. (This setup is remembered — you only
      need to redo it if the tool's page layout changes.)
-4. Click **➕ Collect this page**. It grabs the rows from the page.
-5. Click the tool's own **Next** button to go to the next page.
-6. Click the **ID Tracker** bookmark again (the panel re-opens, still
-   showing your running total) and click **➕ Collect this page** again.
-7. Repeat steps 5–6 for every page.
-8. When you're done, click **📋 Finish & copy for Sheet**:
+4. Either:
+   - **Manually, page by page:** click **➕ Collect this page**, then click
+     the tool's own **Next** button, then click the **ID Tracker** bookmark
+     again (the panel re-opens, still showing your running total) and
+     click **➕ Collect this page** again. Repeat for every page.
+   - **Or automatically, if you picked a Next button in step 3:** click
+     **▶ Auto-collect all pages** once. It collects the current page,
+     clicks Next, waits for the new rows to load, collects again, and
+     keeps going until it reaches the last page (or you click **⏹ Stop**).
+     See **Auto-collect all pages** below for when this works.
+5. When you're done, click **📋 Finish & copy for Sheet**:
    - If Vendor/Category were picked in step 3, they're already filled in
      from the page — nothing more to do.
    - For any brand still missing a Vendor or Category (not picked, or
@@ -75,7 +85,7 @@ do this once — it keeps working after this.
      auto-suggests the Category if that Vendor's already been used
      before).
    - It then copies a ready-to-paste block to your clipboard.
-9. Go to the Google Sheet tracker, click the top-left cell of the ID
+6. Go to the Google Sheet tracker, click the top-left cell of the ID
    column, and paste (`Ctrl+V` / `Cmd+V`). ID, Brand, Vendor and Category
    land in their columns automatically (plus No. of SKUs, if you picked
    that field); fill in "No. of Child" by hand if you didn't.
@@ -87,6 +97,26 @@ next tracking run) without forgetting the Vendor/Category memory.
 If your browser blocks the auto-copy (some browsers require a recent click
 before allowing clipboard writes), the panel shows the same text in a box
 you can select and copy manually — nothing is lost.
+
+## Auto-collect all pages
+
+If you pick a "Next" button in **🎯 Setup fields**, a green
+**▶ Auto-collect all pages** button appears on the main panel. Click it
+once and it will, on its own: collect the current page, click Next, wait
+for the new rows to appear, collect again, and repeat until either the
+Next button becomes disabled/missing (normal end-of-list signal) or the
+page stops changing after a click (it waits up to 8 seconds each time).
+Click **⏹ Stop** any time to break out early — nothing collected so far is
+lost.
+
+This only works if clicking Next loads the next set of rows **without a
+full page reload** (i.e. the page updates itself, like the QC countdown
+timers on this tool do) — that's the case for most modern web apps. If the
+tool instead does a full page reload/navigation when you click Next, the
+script itself gets wiped out mid-navigation (a browser thing, unrelated to
+this tool), Auto-collect will only grab the first page, and you'll see it
+stop early. In that case just use the manual page-by-page flow in step 4 —
+whatever it already collected is saved and nothing is lost either way.
 
 ## Notes / limitations
 
