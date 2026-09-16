@@ -20,7 +20,12 @@
 (function () {
   'use strict';
 
-  var ROWS_KEY = '__idTrackerRows_v1';
+  // Bumped alongside the row-detection rewrite: earlier versions could
+  // collect garbage rows (matched page chrome like nav/filter/action
+  // labels instead of real product rows). Versioning the key means a
+  // browser with old contaminated data starts clean instead of silently
+  // merging garbage into a correct collection.
+  var ROWS_KEY = '__idTrackerRows_v2';
   var MAP_KEY = '__idTrackerVendorMap_v1';
   var CFG_KEY = '__idTrackerConfig_v2';
   var PANEL_ID = '__idTrackerPanel';
