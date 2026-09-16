@@ -86,11 +86,16 @@ do this once — it keeps working after this.
      down** button if several new brands share the same vendor, and it
      auto-suggests the Category if that Vendor's already been used
      before).
-   - It then copies a ready-to-paste block to your clipboard.
+   - It then copies a ready-to-paste block to your clipboard, with a
+     header row (ID, Brand, Vendor, Category…) on top by default —
+     uncheck **"Include a header row"** on the main panel first if you're
+     pasting below existing rows already in the tracker rather than
+     starting a fresh sheet.
 6. Go to the Google Sheet tracker, click the top-left cell of the ID
-   column, and paste (`Ctrl+V` / `Cmd+V`). ID, Brand, Vendor and Category
-   land in their columns automatically (plus No. of SKUs, if you picked
-   that field); fill in "No. of Child" by hand if you didn't.
+   column (or the row where you want the new data to start), and paste
+   (`Ctrl+V` / `Cmd+V`). ID, Brand, Vendor and Category land in their
+   columns automatically (plus No. of SKUs, if you picked that field);
+   fill in "No. of Child" by hand if you didn't.
 
 Use **🏷 Vendor/Category list** any time to review or correct what it has
 remembered. **🧹 Clear collected IDs** starts a fresh batch (e.g. for your

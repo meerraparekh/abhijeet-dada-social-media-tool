@@ -48,7 +48,7 @@
     cfg: loadJSON(CFG_KEY, {
       rowSelector: '', rowSkip: 0,
       idPath: null, brandPath: null, vendorPath: null, categoryPath: null, skusPath: null,
-      nextSelector: ''
+      nextSelector: '', includeHeader: true
     })
   };
 
@@ -438,6 +438,11 @@
   function buildTSV() {
     var includeSkus = !!state.cfg.skusPath;
     var lines = [];
+    if (state.cfg.includeHeader !== false) {
+      var header = ['ID', 'Brand', 'Vendor', 'Category'];
+      if (includeSkus) header.push('SKUs');
+      lines.push(header.join('\t'));
+    }
     Object.keys(state.rows).forEach(function (id) {
       var r = state.rows[id];
       var eff = effectiveVendorCategory(r);
@@ -547,6 +552,16 @@
     body.appendChild(button('📋 Finish & copy for Sheet', renderFinish, '#2f9e44'));
     body.appendChild(button('🏷 Vendor/Category list', renderVendorList, '#495057'));
     body.appendChild(document.createElement('br'));
+
+    var headerLabel = document.createElement('label');
+    headerLabel.style.cssText = 'font-size:11px;color:#aaa;display:block;margin-top:6px;';
+    var headerCb = document.createElement('input');
+    headerCb.type = 'checkbox';
+    headerCb.checked = state.cfg.includeHeader !== false;
+    headerCb.onchange = function () { state.cfg.includeHeader = headerCb.checked; persist(); };
+    headerLabel.appendChild(headerCb);
+    headerLabel.appendChild(document.createTextNode(' Include a header row (ID, Brand, Vendor, Category…) — turn off if you\'re appending below existing rows in the tracker.'));
+    body.appendChild(headerLabel);
 
     body.appendChild(button('🧹 Clear collected IDs', function () {
       if (confirm('Clear all collected rows for this batch? (Vendor/Category memory is kept.)')) {
