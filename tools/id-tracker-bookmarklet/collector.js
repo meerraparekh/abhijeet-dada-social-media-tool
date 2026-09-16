@@ -1,12 +1,15 @@
 /**
  * ID Tracker Collector — bookmarklet source.
  *
- * Run this on each page of the internal tool (10 IDs/page). It scans the
- * page's tables, lets you pick which columns are ID / Brand, accumulates
+ * Run this on each page of the internal tool (10 IDs/page). You click once
+ * on an example ID, Brand, Vendor and Category value on the page, and it
+ * works out how to find every other row's values automatically (works for
+ * real <table> markup as well as div/card-based grids). It accumulates
  * rows across pages (deduped by ID, blank-brand rows dropped), remembers
- * Vendor/Category per brand so repeat brands auto-fill, and produces a
- * tab-separated block you paste directly into Google Sheets (ID, Brand,
- * Vendor, Category — "No of Child" stays manual as today).
+ * Vendor/Category per brand as a fallback for rows where those fields
+ * weren't picked or came back blank, and produces a tab-separated block
+ * you paste directly into Google Sheets (ID, Brand, Vendor, Category —
+ * "No of Child" stays manual as today).
  *
  * See build.js for how this turns into the javascript: bookmarklet URL,
  * and README.md for install/usage instructions.
@@ -16,7 +19,7 @@
 
   var ROWS_KEY = '__idTrackerRows_v1';
   var MAP_KEY = '__idTrackerVendorMap_v1';
-  var CFG_KEY = '__idTrackerConfig_v1';
+  var CFG_KEY = '__idTrackerConfig_v2';
   var PANEL_ID = '__idTrackerPanel';
 
   function loadJSON(key, fallback) {
@@ -32,9 +35,9 @@
   }
 
   var state = {
-    rows: loadJSON(ROWS_KEY, {}),        // { id: { id, brand } }
-    vendorMap: loadJSON(MAP_KEY, {}),    // { brandLower: { brand, vendor, category } }
-    cfg: loadJSON(CFG_KEY, { tableIndex: 0, idCol: 1, brandCol: 2, headerRow: true })
+    rows: loadJSON(ROWS_KEY, {}),        // { id: { id, brand, vendor, category } }
+    vendorMap: loadJSON(MAP_KEY, {}),    // { brandLower: { brand, vendor, category } } — fallback per brand
+    cfg: loadJSON(CFG_KEY, { idSelector: '', brandSelector: '', vendorSelector: '', categorySelector: '' })
   };
 
   function persist() {
@@ -43,83 +46,138 @@
     saveJSON(CFG_KEY, state.cfg);
   }
 
-  function candidateTables() {
-    return Array.prototype.filter.call(document.querySelectorAll('table'), function (t) {
-      return t.querySelectorAll('tr').length > 1;
-    });
+  // ---------- field picking (works on tables, divs, cards — anything) ----------
+
+  function cssEscape(s) {
+    if (window.CSS && window.CSS.escape) return window.CSS.escape(s);
+    return s.replace(/([^a-zA-Z0-9_-])/g, '\\$1');
   }
 
-  function clearHighlights() {
-    Array.prototype.forEach.call(document.querySelectorAll('[data-id-tracker-badge]'), function (b) {
-      b.remove();
-    });
-    Array.prototype.forEach.call(document.querySelectorAll('table'), function (t) {
-      t.style.outline = '';
-    });
+  function classTokens(el) {
+    var c = el.className;
+    if (!c || typeof c !== 'string') return [];
+    return c.trim().split(/\s+/).filter(Boolean);
   }
 
-  function highlightTables(tables) {
-    clearHighlights();
-    tables.forEach(function (t, i) {
-      t.style.outline = (i === state.cfg.tableIndex) ? '3px solid #e64980' : '2px dashed #4c6ef5';
-      var badge = document.createElement('div');
-      badge.setAttribute('data-id-tracker-badge', '1');
-      badge.textContent = 'Table #' + i;
-      badge.style.cssText = 'position:absolute;background:#e64980;color:#fff;font:11px sans-serif;' +
-        'padding:2px 6px;border-radius:4px;z-index:2147483647;pointer-events:none;';
-      var r = t.getBoundingClientRect();
-      badge.style.left = (window.scrollX + r.left) + 'px';
-      badge.style.top = (window.scrollY + r.top - 18) + 'px';
-      document.body.appendChild(badge);
-    });
+  function selectorCandidates(el) {
+    var out = [];
+    var cur = el;
+    var depth = 0;
+    while (cur && cur.tagName && depth < 5) {
+      var tag = cur.tagName.toLowerCase();
+      var classes = classTokens(cur);
+      if (classes.length) {
+        for (var i = classes.length; i >= 1; i--) {
+          out.push(tag + '.' + classes.slice(0, i).map(cssEscape).join('.'));
+        }
+      } else {
+        out.push(tag);
+      }
+      cur = cur.parentElement;
+      depth++;
+    }
+    return out;
   }
 
-  function getRows(table, headerRow) {
-    var trs = Array.prototype.slice.call(table.querySelectorAll('tr'));
-    if (headerRow) trs = trs.slice(1);
-    return trs.map(function (tr) {
-      return Array.prototype.map.call(tr.querySelectorAll('td,th'), function (c) {
-        return c.textContent.replace(/\s+/g, ' ').trim();
+  function nthChildPath(el) {
+    var parts = [];
+    var cur = el;
+    while (cur && cur.parentElement) {
+      var idx = Array.prototype.indexOf.call(cur.parentElement.children, cur) + 1;
+      parts.unshift(cur.tagName.toLowerCase() + ':nth-child(' + idx + ')');
+      cur = cur.parentElement;
+      if (parts.length > 8) break;
+    }
+    return parts.join(' > ');
+  }
+
+  function pickBestSelector(el) {
+    var candidates = selectorCandidates(el);
+    for (var i = 0; i < candidates.length; i++) {
+      var sel = candidates[i];
+      try {
+        var matches = document.querySelectorAll(sel);
+        if (matches.length >= 2 && Array.prototype.indexOf.call(matches, el) !== -1) {
+          return sel;
+        }
+      } catch (e) { /* invalid selector, skip */ }
+    }
+    return nthChildPath(el);
+  }
+
+  function textOf(el) {
+    return el.textContent.replace(/\s+/g, ' ').trim();
+  }
+
+  // ---------- data extraction ----------
+
+  var FIELDS = ['id', 'brand', 'vendor', 'category'];
+
+  function selectorsConfigured() {
+    return !!(state.cfg.idSelector && state.cfg.brandSelector);
+  }
+
+  function fieldEls(field) {
+    var sel = state.cfg[field + 'Selector'];
+    if (!sel) return [];
+    try { return Array.prototype.slice.call(document.querySelectorAll(sel)); } catch (e) { return []; }
+  }
+
+  function parseCurrentPage() {
+    if (!selectorsConfigured()) return { rows: [], counts: {}, configured: false };
+    var elsByField = {};
+    FIELDS.forEach(function (f) { elsByField[f] = fieldEls(f); });
+    // Row count is driven by ID/Brand (the required fields); Vendor/Category are optional extras.
+    var n = Math.min(elsByField.id.length, elsByField.brand.length);
+    var rows = [];
+    for (var i = 0; i < n; i++) {
+      var row = {};
+      FIELDS.forEach(function (f) {
+        row[f] = elsByField[f][i] ? textOf(elsByField[f][i]) : '';
       });
-    }).filter(function (cells) { return cells.length > 0; });
-  }
-
-  function parseCurrentTable() {
-    var tables = candidateTables();
-    var table = tables[state.cfg.tableIndex];
-    if (!table) return { rows: [], count: 0 };
-    var rows = getRows(table, state.cfg.headerRow);
-    var idIdx = state.cfg.idCol - 1;
-    var brandIdx = state.cfg.brandCol - 1;
-    var parsed = rows.map(function (cells) {
-      return { id: (cells[idIdx] || '').trim(), brand: (cells[brandIdx] || '').trim() };
-    });
-    return { rows: parsed, count: parsed.length };
+      rows.push(row);
+    }
+    var counts = {};
+    FIELDS.forEach(function (f) { counts[f] = elsByField[f].length; });
+    return { rows: rows, counts: counts, configured: true };
   }
 
   function collectCurrentPage() {
-    var parsed = parseCurrentTable().rows;
-    var added = 0;
-    parsed.forEach(function (r) {
-      if (!r.id || !r.brand) return; // filter: drop blank brand (and blank id)
+    var parsed = parseCurrentPage();
+    var added = 0, skippedBlank = 0;
+    parsed.rows.forEach(function (r) {
+      if (!r.id || !r.brand) { skippedBlank++; return; }
       if (!state.rows[r.id]) added++;
-      state.rows[r.id] = { id: r.id, brand: r.brand };
+      state.rows[r.id] = { id: r.id, brand: r.brand, vendor: r.vendor, category: r.category };
+      // Directly-scraped Vendor/Category are authoritative — keep the brand memory fresh from them.
+      if (r.vendor || r.category) {
+        state.vendorMap[brandKey(r.brand)] = { brand: r.brand, vendor: r.vendor, category: r.category };
+      }
     });
     persist();
-    return added;
+    return { added: added, skippedBlank: skippedBlank, counts: parsed.counts, configured: parsed.configured };
   }
 
   function brandKey(b) { return b.trim().toLowerCase(); }
+
+  function effectiveVendorCategory(row) {
+    var fallback = state.vendorMap[brandKey(row.brand)] || {};
+    return {
+      vendor: row.vendor || fallback.vendor || '',
+      category: row.category || fallback.category || ''
+    };
+  }
 
   function missingBrands() {
     var seen = {};
     var out = [];
     Object.keys(state.rows).forEach(function (id) {
-      var b = state.rows[id].brand;
-      var k = brandKey(b);
+      var r = state.rows[id];
+      var k = brandKey(r.brand);
       if (!seen[k]) {
         seen[k] = true;
-        if (!state.vendorMap[k]) out.push(b);
+        var eff = effectiveVendorCategory(r);
+        if (!eff.vendor || !eff.category) out.push(r.brand);
       }
     });
     return out;
@@ -129,8 +187,8 @@
     var lines = [];
     Object.keys(state.rows).forEach(function (id) {
       var r = state.rows[id];
-      var v = state.vendorMap[brandKey(r.brand)] || { vendor: '', category: '' };
-      lines.push([r.id, r.brand, v.vendor || '', v.category || ''].join('\t'));
+      var eff = effectiveVendorCategory(r);
+      lines.push([r.id, r.brand, eff.vendor, eff.category].join('\t'));
     });
     return lines.join('\n');
   }
@@ -146,6 +204,7 @@
   // ---------- UI ----------
 
   var panel, body;
+  var pickCleanup = null;
 
   function ensurePanel() {
     var existing = document.getElementById(PANEL_ID);
@@ -158,7 +217,7 @@
     var header = document.createElement('div');
     header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;';
     header.innerHTML = '<strong>ID Tracker</strong>';
-    var closeBtn = button('✕', function () { panel.remove(); clearHighlights(); }, 'transparent');
+    var closeBtn = button('✕', function () { stopPicking(); panel.remove(); }, 'transparent');
     closeBtn.style.padding = '2px 8px';
     header.appendChild(closeBtn);
     panel.appendChild(header);
@@ -176,15 +235,6 @@
     return b;
   }
 
-  function numberInput(value, onChange, width) {
-    var i = document.createElement('input');
-    i.type = 'number';
-    i.value = value;
-    i.style.cssText = 'width:' + (width || '50px') + ';margin:0 6px;padding:3px;border-radius:4px;border:1px solid #444;';
-    i.oninput = function () { onChange(parseInt(i.value, 10) || 1); };
-    return i;
-  }
-
   function textInput(value, placeholder) {
     var i = document.createElement('input');
     i.type = 'text';
@@ -195,20 +245,33 @@
   }
 
   function renderMain() {
+    stopPicking();
     body.innerHTML = '';
     var count = Object.keys(state.rows).length;
     var summary = document.createElement('div');
-    summary.style.marginBottom = '8px';
+    summary.style.marginBottom = '4px';
     summary.innerHTML = 'Collected so far: <strong>' + count + '</strong> unique ID(s)';
     body.appendChild(summary);
 
+    var configured = selectorsConfigured();
+    var status = document.createElement('div');
+    status.style.cssText = 'font-size:11px;color:#aaa;margin-bottom:8px;';
+    status.textContent = configured ? 'ID & Brand fields are set up on this page layout.' : '⚠ Set up ID & Brand fields first (below).';
+    body.appendChild(status);
+
     body.appendChild(button('➕ Collect this page', function () {
-      var added = collectCurrentPage();
+      var r = collectCurrentPage();
       renderMain();
-      toast(added + ' new row(s) added (blank-brand rows skipped).');
+      if (!r.configured) {
+        toast('Set up ID & Brand fields first.');
+      } else if (r.counts.id !== r.counts.brand) {
+        toast(r.added + ' added, ' + r.skippedBlank + ' skipped — ⚠ found ' + r.counts.id + ' ID(s) but ' + r.counts.brand + ' Brand(s), check Setup.');
+      } else {
+        toast(r.added + ' new row(s) added' + (r.skippedBlank ? ', ' + r.skippedBlank + ' skipped (blank)' : '') + '.');
+      }
     }));
 
-    body.appendChild(button('⚙ Setup columns', renderSetup, '#495057'));
+    body.appendChild(button('🎯 Setup fields', renderSetup, '#495057'));
     body.appendChild(document.createElement('br'));
 
     body.appendChild(button('📋 Finish & copy for Sheet', renderFinish, '#2f9e44'));
@@ -229,58 +292,105 @@
     body.appendChild(hint);
   }
 
+  function startPicking(target, onPicked) {
+    stopPicking();
+    var prevOutline = null, prevEl = null;
+
+    function onMouseOver(e) {
+      if (panel.contains(e.target)) return;
+      if (prevEl) prevEl.style.outline = prevOutline;
+      prevEl = e.target;
+      prevOutline = prevEl.style.outline;
+      prevEl.style.outline = '2px solid #fab005';
+    }
+    function onClick(e) {
+      if (panel.contains(e.target)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var el = e.target;
+      cleanup();
+      onPicked(el);
+    }
+    function onKeyDown(e) {
+      if (e.key === 'Escape') { cleanup(); renderSetup(); }
+    }
+    function cleanup() {
+      if (prevEl) prevEl.style.outline = prevOutline;
+      document.removeEventListener('mouseover', onMouseOver, true);
+      document.removeEventListener('click', onClick, true);
+      document.removeEventListener('keydown', onKeyDown, true);
+      pickCleanup = null;
+    }
+
+    document.addEventListener('mouseover', onMouseOver, true);
+    document.addEventListener('click', onClick, true);
+    document.addEventListener('keydown', onKeyDown, true);
+    pickCleanup = cleanup;
+  }
+
+  function stopPicking() {
+    if (pickCleanup) pickCleanup();
+  }
+
+  var FIELD_LABELS = { id: 'ID', brand: 'Brand', vendor: 'Vendor', category: 'Category' };
+  var OPTIONAL_FIELDS = { vendor: true, category: true };
+
   function renderSetup() {
+    stopPicking();
     body.innerHTML = '';
-    var tables = candidateTables();
-    highlightTables(tables);
 
     var info = document.createElement('div');
-    info.textContent = tables.length ? ('Found ' + tables.length + ' table(s). Pink outline = selected.') : 'No tables with rows found on this page.';
-    info.style.marginBottom = '6px';
+    info.style.marginBottom = '8px';
+    info.innerHTML = 'Click a button below, then click the matching value <u>on the page</u> (in the first row). Press Esc to cancel. ID and Brand are required; Vendor and Category are optional — leave unset if this page doesn\'t show them, and you\'ll be asked for them once per brand instead.';
     body.appendChild(info);
 
-    var row1 = document.createElement('div');
-    row1.textContent = 'Table #:';
-    var tIdx = numberInput(state.cfg.tableIndex, function (v) {
-      state.cfg.tableIndex = Math.max(0, v);
-      highlightTables(candidateTables());
-      persist();
+    FIELDS.forEach(function (field) {
+      var selKey = field + 'Selector';
+      var status = document.createElement('div');
+      status.style.cssText = 'margin-top:10px;margin-bottom:4px;';
+      var count = state.cfg[selKey] ? (function () { try { return document.querySelectorAll(state.cfg[selKey]).length; } catch (e) { return 0; } })() : 0;
+      var label = FIELD_LABELS[field] + (OPTIONAL_FIELDS[field] ? ' (optional)' : '');
+      status.textContent = label + ': ' + (state.cfg[selKey] ? ('✅ set (' + count + ' found on this page)') : '❌ not set');
+      body.appendChild(status);
+
+      var row = document.createElement('div');
+      row.appendChild(button('🎯 Pick ' + FIELD_LABELS[field] + ' value', function () {
+        body.innerHTML = '';
+        var msg = document.createElement('div');
+        msg.textContent = 'Now click the ' + FIELD_LABELS[field] + ' value in the FIRST row of the list (Esc to cancel)...';
+        body.appendChild(msg);
+        startPicking(field, function (el) {
+          state.cfg[selKey] = pickBestSelector(el);
+          persist();
+          renderSetup();
+        });
+      }));
+      if (state.cfg[selKey]) {
+        row.appendChild(button('Clear', function () {
+          state.cfg[selKey] = '';
+          persist();
+          renderSetup();
+        }, '#495057'));
+      }
+      body.appendChild(row);
     });
-    row1.appendChild(tIdx);
-    body.appendChild(row1);
 
-    var row2 = document.createElement('div');
-    row2.textContent = 'ID column #:';
-    var idc = numberInput(state.cfg.idCol, function (v) { state.cfg.idCol = Math.max(1, v); persist(); });
-    row2.appendChild(idc);
-    body.appendChild(row2);
-
-    var row3 = document.createElement('div');
-    row3.textContent = 'Brand column #:';
-    var bc = numberInput(state.cfg.brandCol, function (v) { state.cfg.brandCol = Math.max(1, v); persist(); });
-    row3.appendChild(bc);
-    body.appendChild(row3);
-
-    var row4 = document.createElement('label');
-    row4.style.display = 'block';
-    row4.style.marginTop = '4px';
-    var hcb = document.createElement('input');
-    hcb.type = 'checkbox';
-    hcb.checked = state.cfg.headerRow;
-    hcb.onchange = function () { state.cfg.headerRow = hcb.checked; persist(); };
-    row4.appendChild(hcb);
-    row4.appendChild(document.createTextNode(' First row is a header (skip it)'));
-    body.appendChild(row4);
-
+    body.appendChild(document.createElement('br'));
     body.appendChild(button('👁 Preview parsed rows', function () {
-      var parsed = parseCurrentTable().rows.slice(0, 5);
-      alert(parsed.length
-        ? 'First rows parsed as:\n\n' + parsed.map(function (r) { return 'ID=' + r.id + '  |  Brand=' + r.brand; }).join('\n')
-        : 'No rows parsed — check table #/column #.');
+      var parsed = parseCurrentPage();
+      if (!parsed.configured) { alert('Set up ID and Brand fields first.'); return; }
+      var lines = parsed.rows.slice(0, 6).map(function (r) {
+        return 'ID=' + r.id + ' | Brand=' + r.brand + ' | Vendor=' + (r.vendor || '(none)') + ' | Category=' + (r.category || '(none)');
+      });
+      var mismatch = FIELDS.filter(function (f) { return state.cfg[f + 'Selector'] && parsed.counts[f] !== parsed.counts.id; });
+      var extra = mismatch.length
+        ? '\n\n⚠ ' + mismatch.map(function (f) { return FIELD_LABELS[f] + '=' + parsed.counts[f]; }).join(', ') + ' vs ID=' + parsed.counts.id + ' — some fields may not line up. Try re-picking.'
+        : '';
+      alert(lines.length ? ('First rows parsed as:\n\n' + lines.join('\n') + extra) : 'No rows parsed — try picking again.');
     }, '#495057'));
     body.appendChild(document.createElement('br'));
 
-    body.appendChild(button('← Back', function () { clearHighlights(); renderMain(); }, '#495057'));
+    body.appendChild(button('← Back', function () { stopPicking(); renderMain(); }, '#495057'));
   }
 
   function renderFinish() {
@@ -296,7 +406,6 @@
     body.appendChild(info);
 
     var inputs = {};
-    var lastVendor = '';
     missing.forEach(function (brand) {
       var wrap = document.createElement('div');
       wrap.style.cssText = 'border-top:1px solid #333;padding:6px 0;';
@@ -311,7 +420,6 @@
 
       // suggest category from vendor map if this vendor was already used elsewhere
       vIn.oninput = function () {
-        lastVendor = vIn.value;
         if (!cIn.value) {
           var match = Object.keys(state.vendorMap).map(function (k) { return state.vendorMap[k]; })
             .filter(function (v) { return v.vendor && v.vendor.trim().toLowerCase() === vIn.value.trim().toLowerCase(); })
@@ -397,9 +505,9 @@
     var t = document.createElement('div');
     t.textContent = text;
     t.style.cssText = 'position:fixed;bottom:16px;right:16px;background:#333;color:#fff;padding:8px 12px;' +
-      'border-radius:6px;font:12px sans-serif;z-index:2147483647;';
+      'border-radius:6px;font:12px sans-serif;z-index:2147483647;max-width:320px;';
     document.body.appendChild(t);
-    setTimeout(function () { t.remove(); }, 2200);
+    setTimeout(function () { t.remove(); }, 2600);
   }
 
   function escapeHtml(s) {

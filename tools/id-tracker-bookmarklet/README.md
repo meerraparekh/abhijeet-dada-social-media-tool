@@ -8,14 +8,16 @@ on the internal tool's page, using your existing logged-in session. Nothing
 is sent anywhere else — everything is stored locally in your browser.
 
 What it does:
-- Reads the ID + Brand table straight off the page (no more selecting and
-  copying by hand).
+- Reads ID, Brand, Vendor and Category straight off the page (no more
+  selecting and copying by hand) — works whether the list is a real HTML
+  table or a div/card-based grid.
 - Remembers everything you've collected as you click "Next" and move
   through pages, and removes duplicates automatically.
 - Drops rows with a blank Brand (same as your current Excel filter step).
-- Remembers Vendor + Category per brand. The first time it sees a brand it
-  asks you once; every time after that (even days later) it fills them in
-  automatically.
+- If a page doesn't show Vendor/Category (or you skip setting those up),
+  it falls back to a remembered Vendor + Category per brand: the first
+  time it sees a brand with no Vendor/Category it asks you once, and
+  every time after that (even days later) it fills them in automatically.
 - Gives you one block of text — ID, Brand, Vendor, Category — ready to
   paste straight into Google Sheets. "No. of Child" stays manual, same as
   today.
@@ -37,27 +39,34 @@ do this once — it keeps working after this.
 
 ## 2. Using it on the internal tool
 
-1. Log in and open page 1 of the tool's list (the one with the ID/Brand
-   table).
+1. Log in and open page 1 of the tool's list.
 2. Click the **ID Tracker** bookmark. A small panel appears in the top
    right of the page.
-3. Click **⚙ Setup columns** once, on the first page only:
-   - The panel outlines the tables it found on the page and numbers them.
-   - Set **Table #** to the outlined table with your data (usually `0`).
-   - Set **ID column #** and **Brand column #** to match where those
-     columns are (e.g. `1` and `2`).
-   - Click **👁 Preview parsed rows** to double check it read the right
-     values, then **← Back**. (It remembers this setup for next time.)
-4. Click **➕ Collect this page**. It grabs the 10 rows from the page.
+3. Click **🎯 Setup fields** once, on the first page only. For each field
+   (ID, Brand, Vendor, Category):
+   - Click **🎯 Pick \<Field\> value**, then click the matching value in the
+     **first row** of the list on the page itself (e.g. click "45798" for
+     ID, "Party Centre" for Brand, "PARTY CENTRE LLC" for Vendor,
+     "Costumes" for Category). Press `Esc` if you click the wrong thing.
+   - Vendor and Category are optional — if the list doesn't show them,
+     leave those two unset; you'll be asked for them once per brand
+     instead at the end (see step 8).
+   - Click **👁 Preview parsed rows** to confirm it read the first few rows
+     correctly, then **← Back**. (This setup is remembered — you only
+     need to redo it if the tool's page layout changes.)
+4. Click **➕ Collect this page**. It grabs the rows from the page.
 5. Click the tool's own **Next** button to go to the next page.
 6. Click the **ID Tracker** bookmark again (the panel re-opens, still
    showing your running total) and click **➕ Collect this page** again.
 7. Repeat steps 5–6 for every page.
 8. When you're done, click **📋 Finish & copy for Sheet**:
-   - If any brands are new, it asks you for their Vendor + Category once
-     (there's a **↓ fill vendor down** button if several new brands share
-     the same vendor, and it auto-suggests the Category if that Vendor's
-     already been used before).
+   - If Vendor/Category were picked in step 3, they're already filled in
+     from the page — nothing more to do.
+   - For any brand still missing a Vendor or Category (not picked, or
+     blank on some rows), it asks you once (there's a **↓ fill vendor
+     down** button if several new brands share the same vendor, and it
+     auto-suggests the Category if that Vendor's already been used
+     before).
    - It then copies a ready-to-paste block to your clipboard.
 9. Go to the Google Sheet tracker, click the top-left cell of the ID
    column, and paste (`Ctrl+V` / `Cmd+V`). ID, Brand, Vendor and Category
@@ -79,7 +88,7 @@ you can select and copy manually — nothing is lost.
   you switch browsers/computers, or clear site data, you'll need to
   re-teach it the Vendor/Category list (or someone can export/import
   `localStorage` values if that becomes worth automating later).
-- If the tool changes its page layout, redo the **⚙ Setup columns** step.
+- If the tool changes its page layout, redo the **🎯 Setup fields** step.
 
 ## Files
 
