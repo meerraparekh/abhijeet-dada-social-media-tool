@@ -143,10 +143,37 @@
     return !!(state.cfg.idSelector && state.cfg.brandSelector);
   }
 
+  // Excludes table/grid header cells — a selector can end up matching both
+  // header and data cells if they share a CSS class (common with plain
+  // <table> markup), which otherwise pollutes every row with header text
+  // that never changes between pages.
+  function isHeaderish(el) {
+    if (!el) return false;
+    var tag = el.tagName ? el.tagName.toLowerCase() : '';
+    if (tag === 'th') return true;
+    var role = el.getAttribute && el.getAttribute('role');
+    if (role === 'columnheader' || role === 'rowheader') return true;
+    var cur = el, depth = 0;
+    while (cur && depth < 6) {
+      var curTag = cur.tagName ? cur.tagName.toLowerCase() : '';
+      if (curTag === 'thead') return true;
+      var curRole = cur.getAttribute && cur.getAttribute('role');
+      if (curRole === 'columnheader' || curRole === 'rowheader') return true;
+      cur = cur.parentElement;
+      depth++;
+    }
+    return false;
+  }
+
   function fieldEls(field) {
     var sel = state.cfg[field + 'Selector'];
     if (!sel) return [];
-    try { return Array.prototype.slice.call(document.querySelectorAll(sel)); } catch (e) { return []; }
+    try {
+      var all = Array.prototype.slice.call(document.querySelectorAll(sel));
+      var skip = state.cfg[field + 'Skip'] || 0;
+      if (skip > 0) all = all.slice(skip);
+      return all.filter(function (el) { return !isHeaderish(el); });
+    } catch (e) { return []; }
   }
 
   // "No. of SKUs" is usually shown as e.g. "Pending Variants (3)" — pull out just the count.
@@ -515,9 +542,12 @@
       var selKey = field + 'Selector';
       var status = document.createElement('div');
       status.style.cssText = 'margin-top:10px;margin-bottom:4px;';
-      var count = state.cfg[selKey] ? (function () { try { return document.querySelectorAll(state.cfg[selKey]).length; } catch (e) { return 0; } })() : 0;
+      var count = state.cfg[selKey] ? fieldEls(field).length : 0;
+      var skip = state.cfg[field + 'Skip'] || 0;
       var label = FIELD_LABELS[field] + (OPTIONAL_FIELDS[field] ? ' (optional)' : '');
-      status.textContent = label + ': ' + (state.cfg[selKey] ? ('✅ set (' + count + ' found on this page)') : '❌ not set');
+      status.textContent = label + ': ' + (state.cfg[selKey]
+        ? ('✅ set (' + count + ' found on this page' + (skip ? ', skipping ' + skip + ' header/label match(es) before it' : '') + ')')
+        : '❌ not set');
       body.appendChild(status);
 
       var row = document.createElement('div');
@@ -527,7 +557,14 @@
         msg.textContent = 'Now click the ' + FIELD_LABELS[field] + ' value in the FIRST row of the list (Esc to cancel)...';
         body.appendChild(msg);
         startPicking(field, function (el) {
-          state.cfg[selKey] = pickBestSelector(el);
+          var sel = pickBestSelector(el);
+          var matches = document.querySelectorAll(sel);
+          var idx = Array.prototype.indexOf.call(matches, el);
+          state.cfg[selKey] = sel;
+          // You always click the first real row, so any earlier matches for
+          // this selector (e.g. a column-header label sharing the same
+          // styling/class) are noise — skip that many on every extraction.
+          state.cfg[field + 'Skip'] = idx > 0 ? idx : 0;
           persist();
           renderSetup();
         });
@@ -535,6 +572,7 @@
       if (state.cfg[selKey]) {
         row.appendChild(button('Clear', function () {
           state.cfg[selKey] = '';
+          state.cfg[field + 'Skip'] = 0;
           persist();
           renderSetup();
         }, '#495057'));

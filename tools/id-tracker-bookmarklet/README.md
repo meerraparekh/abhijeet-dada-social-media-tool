@@ -125,14 +125,34 @@ whatever it already collected is saved and nothing is lost either way.
 
 **If it stops with "the page didn't change after clicking Next":** go back
 to **🎯 Setup fields** and click **🧪 Test Next click** next to the Next
-button controls. It fires one click and reports after 3 seconds whether
-the rows actually changed:
-- If it says it worked, Auto-collect should now work too (it may have
-  just needed the longer timeout/retry above).
-- If it says rows didn't change, the click isn't reaching the tool's real
-  "Next" handler. Try **🎯 Pick Next button** again and click a slightly
-  different spot — e.g. the arrow icon itself vs. its outer button/link
-  wrapper — since which exact element you click can matter.
+button controls. It fires one click, waits up to 10 seconds, and shows the
+actual ID values it read before/after so you can see exactly what
+happened. A common cause: the ID/Brand selector also matches the column
+header label (e.g. "#" or "Brand" at the top of the list), which never
+changes between pages and makes every comparison look like "no change"
+even though the real rows below it did update — see **Header labels
+getting picked up as data** below, which this bookmarklet now handles
+automatically. If that's not it, the click may not be reaching the tool's
+real "Next" handler — try **🎯 Pick Next button** again on a slightly
+different spot (e.g. the arrow icon itself vs. its outer button/link
+wrapper).
+
+### Header labels getting picked up as data
+
+Some pages style the column header labels (e.g. "#", "Brand") with the
+same CSS class as the actual row values below them, since they're often
+built with the same reusable component/utility classes. If so, the
+ID/Brand/etc. selector would technically match the header label too, and
+since it never changes between pages, it can throw off both the row count
+and (for the Next button) the "did the page change" check.
+
+This is handled automatically: because you always click the **first real
+row's** value when picking a field (never the header), the bookmarklet
+counts how many matches of that selector appear *before* the one you
+clicked, and skips that many every time. The Setup screen shows this as
+"skipping N header/label match(es)" next to a field once it detects one.
+You don't need to do anything differently — just make sure you're
+clicking a real row's value (not the header) when picking each field.
 
 ## Notes / limitations
 
