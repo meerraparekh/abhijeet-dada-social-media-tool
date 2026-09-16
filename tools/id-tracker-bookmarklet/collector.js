@@ -209,6 +209,23 @@
     return new Promise(function (resolve) { setTimeout(resolve, ms); });
   }
 
+  // Mimics a real user click. Scrolls the element into view first (some UIs
+  // ignore clicks on off-screen/virtualized elements), then uses the native
+  // .click() — it already synthesizes the full pointer/mouse event sequence
+  // per spec, so a component listening on mousedown/pointerdown still sees
+  // it. Only falls back to manually dispatching a bare "click" event if
+  // .click() isn't available at all. Never do both — that double-fires the
+  // handler and can skip a page per click.
+  function fireClick(el) {
+    try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) { /* ignore */ }
+    if (typeof el.click === 'function') {
+      try { el.click(); return; } catch (e) { /* fall through to manual dispatch */ }
+    }
+    try {
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    } catch (e) { /* nothing more we can do */ }
+  }
+
   function waitForPageChange(beforeSig, timeoutMs) {
     return new Promise(function (resolve) {
       var start = Date.now();
@@ -223,31 +240,37 @@
   }
 
   // Runs until Next is missing/disabled, the page stops changing, or Stop is clicked.
-  // onProgress(pageNum, totalCollected) is called after each page.
+  // onProgress(pageNum, totalCollected, totalSkippedBlank) is called after each page.
   async function autoCollectAllPages(onProgress) {
     autoStopRequested = false;
     var pageNum = 1;
-    collectCurrentPage();
-    onProgress(pageNum, Object.keys(state.rows).length, null);
+    var totalSkipped = collectCurrentPage().skippedBlank;
+    onProgress(pageNum, Object.keys(state.rows).length, totalSkipped);
     var maxPages = 500;
     while (!autoStopRequested && pageNum < maxPages) {
       var nextEl = document.querySelector(state.cfg.nextSelector);
       if (!nextEl || isDisabledEl(nextEl)) {
-        return { stoppedReason: 'end', pages: pageNum };
+        return { stoppedReason: 'end', pages: pageNum, skipped: totalSkipped };
       }
       var beforeSig = pageSignature();
-      nextEl.click();
-      var changed = await waitForPageChange(beforeSig, 8000);
-      if (autoStopRequested) return { stoppedReason: 'user', pages: pageNum };
+      fireClick(nextEl);
+      var changed = await waitForPageChange(beforeSig, 10000);
+      if (autoStopRequested) return { stoppedReason: 'user', pages: pageNum, skipped: totalSkipped };
       if (!changed) {
-        return { stoppedReason: 'no-change', pages: pageNum };
+        // One retry — some UIs need a second nudge (e.g. a hover state before the first click "arms" the button).
+        nextEl = document.querySelector(state.cfg.nextSelector);
+        if (!nextEl || isDisabledEl(nextEl)) return { stoppedReason: 'end', pages: pageNum, skipped: totalSkipped };
+        fireClick(nextEl);
+        changed = await waitForPageChange(beforeSig, 10000);
+        if (autoStopRequested) return { stoppedReason: 'user', pages: pageNum, skipped: totalSkipped };
+        if (!changed) return { stoppedReason: 'no-change', pages: pageNum, skipped: totalSkipped };
       }
       pageNum++;
-      collectCurrentPage();
-      onProgress(pageNum, Object.keys(state.rows).length, null);
+      totalSkipped += collectCurrentPage().skippedBlank;
+      onProgress(pageNum, Object.keys(state.rows).length, totalSkipped);
       await sleep(250);
     }
-    return { stoppedReason: autoStopRequested ? 'user' : 'max-pages', pages: pageNum };
+    return { stoppedReason: autoStopRequested ? 'user' : 'max-pages', pages: pageNum, skipped: totalSkipped };
   }
 
   function brandKey(b) { return b.trim().toLowerCase(); }
@@ -449,8 +472,9 @@
     note.textContent = 'If the tool reloads the whole page to go to the next set, this will only get page 1 — use "Collect this page" manually instead in that case.';
     body.appendChild(note);
 
-    autoCollectAllPages(function (pageNum, total) {
-      msg.textContent = '⏳ Collecting page ' + pageNum + '… (' + total + ' unique ID(s) so far)';
+    autoCollectAllPages(function (pageNum, total, skipped) {
+      msg.textContent = '⏳ Collecting page ' + pageNum + '… (' + total + ' unique ID(s) so far'
+        + (skipped ? ', ' + skipped + ' skipped for blank Brand' : '') + ')';
     }).then(function (result) {
       body.innerHTML = '';
       var done = document.createElement('div');
@@ -459,10 +483,11 @@
       var reasonText = {
         'end': '✅ Done — reached the last page.',
         'user': '⏹ Stopped.',
-        'no-change': '⚠ Stopped — the page didn\'t change after clicking Next (may be the last page, or it needs more time).',
+        'no-change': '⚠ Stopped — the page didn\'t change after clicking Next twice (may be the last page, the click isn\'t reaching the real button, or it needs more time — try "🧪 Test Next click" in Setup).',
         'max-pages': '⚠ Stopped — hit the safety limit of 500 pages.'
       }[result.stoppedReason] || 'Done.';
-      done.textContent = reasonText + ' Collected ' + total + ' unique ID(s) across ' + result.pages + ' page(s).';
+      done.textContent = reasonText + ' Collected ' + total + ' unique ID(s) across ' + result.pages + ' page(s)'
+        + (result.skipped ? ' (' + result.skipped + ' row(s) skipped for blank Brand).' : '.');
       body.appendChild(done);
       body.appendChild(button('← Back', renderMain, '#495057'));
     }).catch(function (e) {
@@ -542,6 +567,21 @@
         state.cfg.nextSelector = '';
         persist();
         renderSetup();
+      }, '#495057'));
+      nextRow.appendChild(button('🧪 Test Next click', function () {
+        var el = document.querySelector(state.cfg.nextSelector);
+        if (!el) { alert('Next button not found on this page.'); return; }
+        if (isDisabledEl(el)) { alert('Next button looks disabled right now — nothing to test (maybe this is the last page).'); return; }
+        var before = pageSignature();
+        fireClick(el);
+        setTimeout(function () {
+          var after = pageSignature();
+          if (after && after !== before) {
+            alert('✅ It worked — rows changed after clicking Next. Auto-collect should work.');
+          } else {
+            alert('⚠ Rows did NOT change 3 seconds after clicking Next. Either it needs more time (try again / Auto-collect waits up to 10s and retries once), or the click isn\'t reaching the real button — try re-picking a slightly different spot (e.g. the arrow icon itself, or its outer button wrapper).');
+          }
+        }, 3000);
       }, '#495057'));
     }
     body.appendChild(nextRow);

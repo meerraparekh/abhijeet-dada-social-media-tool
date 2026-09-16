@@ -105,9 +105,14 @@ If you pick a "Next" button in **🎯 Setup fields**, a green
 once and it will, on its own: collect the current page, click Next, wait
 for the new rows to appear, collect again, and repeat until either the
 Next button becomes disabled/missing (normal end-of-list signal) or the
-page stops changing after a click (it waits up to 8 seconds each time).
-Click **⏹ Stop** any time to break out early — nothing collected so far is
-lost.
+page stops changing after clicking Next twice in a row (it waits up to 10
+seconds each time, and retries once before giving up). Click **⏹ Stop**
+any time to break out early — nothing collected so far is lost.
+
+The running total and any "skipped for blank Brand" count are shown live
+as it works, and again in the final summary — so if you end up with fewer
+rows than expected, check that number first: it may be correctly filtering
+blank-brand rows rather than missing real ones.
 
 This only works if clicking Next loads the next set of rows **without a
 full page reload** (i.e. the page updates itself, like the QC countdown
@@ -117,6 +122,17 @@ script itself gets wiped out mid-navigation (a browser thing, unrelated to
 this tool), Auto-collect will only grab the first page, and you'll see it
 stop early. In that case just use the manual page-by-page flow in step 4 —
 whatever it already collected is saved and nothing is lost either way.
+
+**If it stops with "the page didn't change after clicking Next":** go back
+to **🎯 Setup fields** and click **🧪 Test Next click** next to the Next
+button controls. It fires one click and reports after 3 seconds whether
+the rows actually changed:
+- If it says it worked, Auto-collect should now work too (it may have
+  just needed the longer timeout/retry above).
+- If it says rows didn't change, the click isn't reaching the tool's real
+  "Next" handler. Try **🎯 Pick Next button** again and click a slightly
+  different spot — e.g. the arrow icon itself vs. its outer button/link
+  wrapper — since which exact element you click can matter.
 
 ## Notes / limitations
 
