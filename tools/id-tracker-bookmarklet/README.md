@@ -150,9 +150,19 @@ This is handled automatically: because you always click the **first real
 row's** value when picking a field (never the header), the bookmarklet
 counts how many matches of that selector appear *before* the one you
 clicked, and skips that many every time. The Setup screen shows this as
-"skipping N header/label match(es)" next to a field once it detects one.
+"after skipping N of M total matches" next to a field once it detects one.
 You don't need to do anything differently — just make sure you're
 clicking a real row's value (not the header) when picking each field.
+
+If a field ever shows **"0 found"** even though it's set, a **Skip count**
+number box appears right under its status — this means the skip amount
+recorded when you picked it no longer matches what's actually on the page
+(e.g. it's skipping more matches than currently exist). The status line
+tells you the raw total (e.g. "after skipping 5 of 2 total matches"):
+- If the raw total is 0 too, the selector itself isn't matching anything
+  right now — re-pick that field.
+- Otherwise, just lower the Skip count box (try 0 first) until the found
+  count looks right — no need to re-pick.
 
 ## Notes / limitations
 

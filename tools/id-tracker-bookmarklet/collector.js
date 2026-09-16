@@ -91,13 +91,20 @@
     return parts.join(' > ');
   }
 
+  // Upper bound on an acceptable match count — a genuine "same field on
+  // every row" selector should match roughly a page's worth of rows, not
+  // hundreds. Without this, a picked element with no distinguishing class
+  // (falling back to something like a bare tag name) could get accepted
+  // even though it matches unrelated elements sitewide.
+  var MAX_REASONABLE_MATCHES = 200;
+
   function pickBestSelector(el) {
     var candidates = selectorCandidates(el);
     for (var i = 0; i < candidates.length; i++) {
       var sel = candidates[i];
       try {
         var matches = document.querySelectorAll(sel);
-        if (matches.length >= 2 && Array.prototype.indexOf.call(matches, el) !== -1) {
+        if (matches.length >= 2 && matches.length <= MAX_REASONABLE_MATCHES && Array.prototype.indexOf.call(matches, el) !== -1) {
           return sel;
         }
       } catch (e) { /* invalid selector, skip */ }
@@ -389,6 +396,16 @@
     return i;
   }
 
+  function numberInput(value, onChange, width) {
+    var i = document.createElement('input');
+    i.type = 'number';
+    i.min = '0';
+    i.value = value;
+    i.style.cssText = 'width:' + (width || '50px') + ';margin:0 4px;padding:3px;border-radius:4px;border:1px solid #444;';
+    i.oninput = function () { onChange(parseInt(i.value, 10) || 0); };
+    return i;
+  }
+
   function renderMain() {
     stopPicking();
     body.innerHTML = '';
@@ -542,13 +559,33 @@
       var selKey = field + 'Selector';
       var status = document.createElement('div');
       status.style.cssText = 'margin-top:10px;margin-bottom:4px;';
+      var rawCount = 0;
+      if (state.cfg[selKey]) { try { rawCount = document.querySelectorAll(state.cfg[selKey]).length; } catch (e) { rawCount = 0; } }
       var count = state.cfg[selKey] ? fieldEls(field).length : 0;
       var skip = state.cfg[field + 'Skip'] || 0;
       var label = FIELD_LABELS[field] + (OPTIONAL_FIELDS[field] ? ' (optional)' : '');
       status.textContent = label + ': ' + (state.cfg[selKey]
-        ? ('✅ set (' + count + ' found on this page' + (skip ? ', skipping ' + skip + ' header/label match(es) before it' : '') + ')')
+        ? ('✅ set (' + count + ' found on this page' + (skip ? ', after skipping ' + skip + ' of ' + rawCount + ' total matches' : '') + ')')
         : '❌ not set');
       body.appendChild(status);
+
+      if (state.cfg[selKey] && (count === 0 || skip > 0)) {
+        var skipRow = document.createElement('div');
+        skipRow.style.cssText = 'font-size:11px;color:#aaa;margin-bottom:4px;';
+        skipRow.appendChild(document.createTextNode('Skip count: '));
+        var skipInput = numberInput(skip, function (v) {
+          state.cfg[field + 'Skip'] = Math.max(0, v);
+          persist();
+          renderSetup();
+        }, '45px');
+        skipRow.appendChild(skipInput);
+        if (count === 0) {
+          skipRow.appendChild(document.createTextNode(rawCount === 0
+            ? ' — 0 total matches even before skipping: the selector itself isn\'t matching anything right now. Re-pick this field.'
+            : ' — try lowering this (it\'s currently skipping all ' + rawCount + ' match(es) found).'));
+        }
+        body.appendChild(skipRow);
+      }
 
       var row = document.createElement('div');
       row.appendChild(button('🎯 Pick ' + FIELD_LABELS[field] + ' value', function () {
