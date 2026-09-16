@@ -48,19 +48,21 @@ do this once — it keeps working after this.
 1. Log in and open page 1 of the tool's list.
 2. Click the **ID Tracker** bookmark. A small panel appears in the top
    right of the page.
-3. Click **🎯 Setup fields** once, on the first page only. For each field
-   (ID, Brand, Vendor, Category, No. of SKUs):
-   - Click **🎯 Pick \<Field\> value**, then click the matching value in the
-     **first row** of the list on the page itself (e.g. click "45798" for
-     ID, "Party Centre" for Brand, "PARTY CENTRE LLC" for Vendor,
-     "Costumes" for Category, or the "Pending Variants (3)" badge for
-     No. of SKUs — it automatically pulls out just the `3`). Press `Esc`
-     if you click the wrong thing.
-   - Vendor, Category and No. of SKUs are all optional — if the list
-     doesn't show a field, or you'd rather keep filling it in by hand,
-     leave it unset. Vendor/Category then fall back to asking you once
-     per brand at the end (see step 8); No. of SKUs simply stays out of
-     the pasted block if left unset.
+3. Click **🎯 Setup fields** once, on the first page only:
+   - Click **🎯 Pick ID value**, then click the ID number in the **first
+     row** of the list (e.g. "45798"). Since this is the very first field
+     you've picked, it'll ask you to pick one more — click **🎯 Pick Brand
+     value** and click "Party Centre" on that **same row**. From those two
+     clicks it works out the repeating "row" pattern on the page, so every
+     field after this only needs a single click each.
+   - Pick Vendor ("PARTY CENTRE LLC"), Category ("Costumes"), and No. of
+     SKUs (the "Pending Variants (3)" badge — it automatically pulls out
+     just the `3`) the same way, one click each, still on that first row.
+     These three are optional — if the list doesn't show a field, or
+     you'd rather keep filling it in by hand, leave it unset. Vendor/
+     Category then fall back to asking you once per brand at the end (see
+     step 5); No. of SKUs simply stays out of the pasted block if left
+     unset. Press `Esc` any time to cancel a pick.
    - There's also a **🎯 Pick Next button** option at the bottom (optional)
      — see **Auto-collect all pages** below for what it unlocks.
    - Click **👁 Preview parsed rows** to confirm it read the first few rows
@@ -127,42 +129,36 @@ whatever it already collected is saved and nothing is lost either way.
 to **🎯 Setup fields** and click **🧪 Test Next click** next to the Next
 button controls. It fires one click, waits up to 10 seconds, and shows the
 actual ID values it read before/after so you can see exactly what
-happened. A common cause: the ID/Brand selector also matches the column
-header label (e.g. "#" or "Brand" at the top of the list), which never
-changes between pages and makes every comparison look like "no change"
-even though the real rows below it did update — see **Header labels
-getting picked up as data** below, which this bookmarklet now handles
-automatically. If that's not it, the click may not be reaching the tool's
-real "Next" handler — try **🎯 Pick Next button** again on a slightly
-different spot (e.g. the arrow icon itself vs. its outer button/link
-wrapper).
+happened. If the values look identical both times, re-check the "Row
+pattern" status in Setup — see below. If that all looks right, the click
+may not be reaching the tool's real "Next" handler — try **🎯 Pick Next
+button** again on a slightly different spot (e.g. the arrow icon itself
+vs. its outer button/link wrapper).
 
-### Header labels getting picked up as data
+### How row detection works (and how to fix it if it's wrong)
 
-Some pages style the column header labels (e.g. "#", "Brand") with the
-same CSS class as the actual row values below them, since they're often
-built with the same reusable component/utility classes. If so, the
-ID/Brand/etc. selector would technically match the header label too, and
-since it never changes between pages, it can throw off both the row count
-and (for the Next button) the "did the page change" check.
+Rather than finding "the ID field" and "the Brand field" independently
+(which breaks if a field has no distinguishing style of its own, or if two
+different fields happen to share the same style), this bookmarklet first
+figures out the repeating **row** — the element that repeats once per
+product — from your first two picks (ID + Brand), then remembers each
+field's *position within that row*. This is why the first field you pick
+always asks for a second one: it needs two points on the same row to work
+out the pattern. Every field after that, including on a later visit,
+resolves in one click because the row pattern is already known.
 
-This is handled automatically: because you always click the **first real
-row's** value when picking a field (never the header), the bookmarklet
-counts how many matches of that selector appear *before* the one you
-clicked, and skips that many every time. The Setup screen shows this as
-"after skipping N of M total matches" next to a field once it detects one.
-You don't need to do anything differently — just make sure you're
-clicking a real row's value (not the header) when picking each field.
+The Setup screen shows a **"Row pattern"** status at the top: "✅ found N
+row(s)" once established. If it ever shows **0 rows** even though a
+pattern is set, a **Row skip count** box appears with the raw total (e.g.
+"skipping 5 of 2 total matches") — this happens if the row selector
+matched something transient at pick time; try lowering it to 0. If the raw
+total is also 0, the row selector itself isn't matching anything right now
+— use **🔄 Reset row pattern** (appears once a pattern exists) and pick ID
+and Brand again.
 
-If a field ever shows **"0 found"** even though it's set, a **Skip count**
-number box appears right under its status — this means the skip amount
-recorded when you picked it no longer matches what's actually on the page
-(e.g. it's skipping more matches than currently exist). The status line
-tells you the raw total (e.g. "after skipping 5 of 2 total matches"):
-- If the raw total is 0 too, the selector itself isn't matching anything
-  right now — re-pick that field.
-- Otherwise, just lower the Skip count box (try 0 first) until the found
-  count looks right — no need to re-pick.
+Each field's own status line shows "N of M row(s) have a value" — if a
+field is consistently missing on some rows (not just occasionally, e.g.
+for out-of-stock items), it likely needs re-picking.
 
 ## Notes / limitations
 

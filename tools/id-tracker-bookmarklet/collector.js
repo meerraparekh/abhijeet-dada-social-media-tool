@@ -2,14 +2,17 @@
  * ID Tracker Collector — bookmarklet source.
  *
  * Run this on each page of the internal tool (10 IDs/page). You click once
- * on an example ID, Brand, Vendor and Category value on the page, and it
- * works out how to find every other row's values automatically (works for
- * real <table> markup as well as div/card-based grids). It accumulates
- * rows across pages (deduped by ID, blank-brand rows dropped), remembers
- * Vendor/Category per brand as a fallback for rows where those fields
- * weren't picked or came back blank, and produces a tab-separated block
- * you paste directly into Google Sheets (ID, Brand, Vendor, Category —
- * "No of Child" stays manual as today).
+ * on an example ID and Brand value on the page (any order); from those two
+ * points it identifies the repeating "row" element (works for real <table>
+ * markup as well as div/card-based grids) and records each field's
+ * position *within* that row, rather than an independent selector per
+ * field — this guarantees every field always lines up on the same row,
+ * even when a field's own element has no distinguishing CSS class.
+ * Vendor/Category/No. of SKUs/Next button are picked the same way once the
+ * row is known. It accumulates rows across pages (deduped by ID, blank-
+ * brand rows dropped), remembers Vendor/Category per brand as a fallback,
+ * and produces a tab-separated block you paste directly into Google Sheets
+ * (ID, Brand, Vendor, Category — "No of Child" stays manual as today).
  *
  * See build.js for how this turns into the javascript: bookmarklet URL,
  * and README.md for install/usage instructions.
@@ -37,7 +40,11 @@
   var state = {
     rows: loadJSON(ROWS_KEY, {}),        // { id: { id, brand, vendor, category } }
     vendorMap: loadJSON(MAP_KEY, {}),    // { brandLower: { brand, vendor, category } } — fallback per brand
-    cfg: loadJSON(CFG_KEY, { idSelector: '', brandSelector: '', vendorSelector: '', categorySelector: '', skusSelector: '', nextSelector: '' })
+    cfg: loadJSON(CFG_KEY, {
+      rowSelector: '', rowSkip: 0,
+      idPath: null, brandPath: null, vendorPath: null, categoryPath: null, skusPath: null,
+      nextSelector: ''
+    })
   };
 
   function persist() {
@@ -125,6 +132,124 @@
     return nthChildPath(el);
   }
 
+  // ---------- row detection + within-row relative paths ----------
+
+  function sameTagAndClass(a, b) {
+    if (!a || !b || a.tagName !== b.tagName) return false;
+    return classTokens(a).join(' ') === classTokens(b).join(' ');
+  }
+
+  function closestCommonAncestor(elA, elB) {
+    var ancestors = [];
+    var cur = elA;
+    while (cur) { ancestors.push(cur); cur = cur.parentElement; }
+    cur = elB;
+    while (cur) {
+      if (ancestors.indexOf(cur) !== -1) return cur;
+      cur = cur.parentElement;
+    }
+    return null;
+  }
+
+  // Given two elements from the SAME row (e.g. the row's ID and Brand
+  // values), finds the repeating row container: walks up from their common
+  // ancestor until it finds a level whose siblings share the same tag+class
+  // (i.e. the same component repeated once per row).
+  function establishRowRoot(elA, elB) {
+    var ancestor = closestCommonAncestor(elA, elB);
+    if (!ancestor) return null;
+    var cur = ancestor;
+    var depth = 0;
+    while (cur && cur.parentElement && depth < 12) {
+      var siblings = Array.prototype.filter.call(cur.parentElement.children, function (c) { return sameTagAndClass(c, cur); });
+      if (siblings.length >= 2) return cur;
+      cur = cur.parentElement;
+      depth++;
+    }
+    return ancestor;
+  }
+
+  // Sequence of child indices from `root` down to `el` — reapplying this
+  // sequence to any other row element finds the equivalent field there.
+  function relativePath(root, el) {
+    var path = [];
+    var cur = el;
+    while (cur && cur !== root) {
+      var parent = cur.parentElement;
+      if (!parent) return null;
+      var idx = Array.prototype.indexOf.call(parent.children, cur);
+      path.unshift(idx);
+      cur = parent;
+    }
+    return cur === root ? path : null;
+  }
+
+  function applyPath(root, path) {
+    var cur = root;
+    for (var i = 0; i < path.length; i++) {
+      if (!cur || !cur.children || !cur.children[path[i]]) return null;
+      cur = cur.children[path[i]];
+    }
+    return cur;
+  }
+
+  function rawRows() {
+    if (!state.cfg.rowSelector) return [];
+    try { return Array.prototype.slice.call(document.querySelectorAll(state.cfg.rowSelector)); } catch (e) { return []; }
+  }
+
+  function currentRows() {
+    var all = rawRows();
+    var skip = state.cfg.rowSkip || 0;
+    return skip > 0 ? all.slice(skip) : all;
+  }
+
+  function findContainingRow(el) {
+    var rows = rawRows();
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i] === el || rows[i].contains(el)) return rows[i];
+    }
+    return null;
+  }
+
+  var pendingPick = null; // { field, el } — transient, holds one pick until a second establishes the row
+
+  // Picking any field either (a) locates it within the already-known row
+  // pattern, or (b) if no row is known yet, pairs it with a previously
+  // stashed pick from a different field to establish the row for the first
+  // time. Returns a short status message to show the user.
+  function handleFieldPick(field, el) {
+    var pathKey = field + 'Path';
+    var rowEl = findContainingRow(el);
+    if (rowEl) {
+      var path = relativePath(rowEl, el);
+      if (!path) return { ok: false, message: 'That element doesn\'t seem to be inside the current row pattern. Try a spot closer to the row\'s main content, or use "🔄 Reset row pattern" below if the page layout changed.' };
+      state.cfg[pathKey] = path;
+      pendingPick = null;
+      persist();
+      return { ok: true };
+    }
+    if (pendingPick && pendingPick.field !== field) {
+      var newRowEl = establishRowRoot(pendingPick.el, el);
+      if (!newRowEl) {
+        pendingPick = null;
+        return { ok: false, message: 'Couldn\'t work out the row pattern from those two picks. Try again with two values that are closer together in the same row.' };
+      }
+      var rowSel = pickBestSelector(newRowEl);
+      var rowMatches = document.querySelectorAll(rowSel);
+      var rowIdx = Array.prototype.indexOf.call(rowMatches, newRowEl);
+      state.cfg.rowSelector = rowSel;
+      state.cfg.rowSkip = rowIdx > 0 ? rowIdx : 0;
+      state.cfg[pendingPick.field + 'Path'] = relativePath(newRowEl, pendingPick.el);
+      state.cfg[pathKey] = relativePath(newRowEl, el);
+      pendingPick = null;
+      persist();
+      return { ok: true };
+    }
+    pendingPick = { field: field, el: el };
+    return { ok: 'pending', message: 'Got "' + FIELD_LABELS[field] + '". Now pick one more field (e.g. ' + (field === 'brand' ? 'ID' : 'Brand') + ') on the SAME row so the row pattern can be worked out.' };
+  }
+
   function isDisabledEl(el) {
     if (!el) return true;
     if (el.disabled) return true;
@@ -147,40 +272,14 @@
   var FIELDS = ['id', 'brand', 'vendor', 'category', 'skus'];
 
   function selectorsConfigured() {
-    return !!(state.cfg.idSelector && state.cfg.brandSelector);
+    return !!(state.cfg.rowSelector && state.cfg.idPath && state.cfg.brandPath);
   }
 
-  // Excludes table/grid header cells — a selector can end up matching both
-  // header and data cells if they share a CSS class (common with plain
-  // <table> markup), which otherwise pollutes every row with header text
-  // that never changes between pages.
-  function isHeaderish(el) {
-    if (!el) return false;
-    var tag = el.tagName ? el.tagName.toLowerCase() : '';
-    if (tag === 'th') return true;
-    var role = el.getAttribute && el.getAttribute('role');
-    if (role === 'columnheader' || role === 'rowheader') return true;
-    var cur = el, depth = 0;
-    while (cur && depth < 6) {
-      var curTag = cur.tagName ? cur.tagName.toLowerCase() : '';
-      if (curTag === 'thead') return true;
-      var curRole = cur.getAttribute && cur.getAttribute('role');
-      if (curRole === 'columnheader' || curRole === 'rowheader') return true;
-      cur = cur.parentElement;
-      depth++;
-    }
-    return false;
-  }
-
-  function fieldEls(field) {
-    var sel = state.cfg[field + 'Selector'];
-    if (!sel) return [];
-    try {
-      var all = Array.prototype.slice.call(document.querySelectorAll(sel));
-      var skip = state.cfg[field + 'Skip'] || 0;
-      if (skip > 0) all = all.slice(skip);
-      return all.filter(function (el) { return !isHeaderish(el); });
-    } catch (e) { return []; }
+  function fieldElsViaRows(field) {
+    var path = state.cfg[field + 'Path'];
+    var rows = currentRows();
+    if (!path) return rows.map(function () { return null; });
+    return rows.map(function (rowEl) { return applyPath(rowEl, path); });
   }
 
   // "No. of SKUs" is usually shown as e.g. "Pending Variants (3)" — pull out just the count.
@@ -197,13 +296,12 @@
   }
 
   function parseCurrentPage() {
-    if (!selectorsConfigured()) return { rows: [], counts: {}, configured: false };
+    if (!selectorsConfigured()) return { rows: [], counts: {}, configured: false, totalRows: 0 };
     var elsByField = {};
-    FIELDS.forEach(function (f) { elsByField[f] = fieldEls(f); });
-    // Row count is driven by ID/Brand (the required fields); the rest are optional extras.
-    var n = Math.min(elsByField.id.length, elsByField.brand.length);
+    FIELDS.forEach(function (f) { elsByField[f] = fieldElsViaRows(f); });
+    var totalRows = currentRows().length;
     var rows = [];
-    for (var i = 0; i < n; i++) {
+    for (var i = 0; i < totalRows; i++) {
       var row = {};
       FIELDS.forEach(function (f) {
         row[f] = extractFieldValue(f, elsByField[f][i]);
@@ -211,8 +309,8 @@
       rows.push(row);
     }
     var counts = {};
-    FIELDS.forEach(function (f) { counts[f] = elsByField[f].length; });
-    return { rows: rows, counts: counts, configured: true };
+    FIELDS.forEach(function (f) { counts[f] = elsByField[f].filter(Boolean).length; });
+    return { rows: rows, counts: counts, configured: true, totalRows: totalRows };
   }
 
   function collectCurrentPage() {
@@ -333,7 +431,7 @@
   }
 
   function buildTSV() {
-    var includeSkus = !!state.cfg.skusSelector;
+    var includeSkus = !!state.cfg.skusPath;
     var lines = [];
     Object.keys(state.rows).forEach(function (id) {
       var r = state.rows[id];
@@ -552,40 +650,56 @@
 
     var info = document.createElement('div');
     info.style.marginBottom = '8px';
-    info.innerHTML = 'Click a button below, then click the matching value <u>on the page</u> (in the first row). Press Esc to cancel. ID and Brand are required; Vendor and Category are optional — leave unset if this page doesn\'t show them, and you\'ll be asked for them once per brand instead. No. of SKUs is optional too — leave it unset to keep filling that in by hand, or pick it (e.g. the number in "Pending Variants (3)") to add it as a 5th column automatically.';
+    info.innerHTML = 'Click a button below, then click the matching value <u>on the page</u> (in the first row). Press Esc to cancel. ID and Brand are required — the first time you pick one of them, you\'ll be asked to pick the other too so the row pattern can be worked out; after that every field just needs one click. Vendor and Category are optional — leave unset if this page doesn\'t show them, and you\'ll be asked for them once per brand instead. No. of SKUs is optional too — leave it unset to keep filling that in by hand, or pick it (e.g. the number in "Pending Variants (3)") to add it as a 5th column automatically.';
     body.appendChild(info);
 
+    var rowRawCount = rawRows().length;
+    var rowCount = currentRows().length;
+    var rowStatus = document.createElement('div');
+    rowStatus.style.cssText = 'margin-bottom:4px;';
+    rowStatus.textContent = 'Row pattern: ' + (state.cfg.rowSelector
+      ? ('✅ found ' + rowCount + ' row(s)' + (state.cfg.rowSkip ? ' (after skipping ' + state.cfg.rowSkip + ' of ' + rowRawCount + ' total matches)' : ''))
+      : '❌ not established yet — pick ID and Brand below to begin.');
+    body.appendChild(rowStatus);
+
+    if (state.cfg.rowSelector && rowCount === 0) {
+      var rowSkipRow = document.createElement('div');
+      rowSkipRow.style.cssText = 'font-size:11px;color:#aaa;margin-bottom:4px;';
+      rowSkipRow.appendChild(document.createTextNode('Row skip count: '));
+      rowSkipRow.appendChild(numberInput(state.cfg.rowSkip || 0, function (v) {
+        state.cfg.rowSkip = Math.max(0, v);
+        persist();
+        renderSetup();
+      }, '45px'));
+      rowSkipRow.appendChild(document.createTextNode(rowRawCount === 0
+        ? ' — 0 total matches even before skipping: the row selector isn\'t matching anything right now.'
+        : ' — try lowering this (currently skipping all ' + rowRawCount + ' match(es) found).'));
+      body.appendChild(rowSkipRow);
+    }
+
+    if (state.cfg.rowSelector) {
+      body.appendChild(button('🔄 Reset row pattern', function () {
+        if (!confirm('This clears the row pattern and every picked field (ID, Brand, Vendor, Category, No. of SKUs). Continue?')) return;
+        state.cfg.rowSelector = '';
+        state.cfg.rowSkip = 0;
+        FIELDS.forEach(function (f) { state.cfg[f + 'Path'] = null; });
+        pendingPick = null;
+        persist();
+        renderSetup();
+      }, '#c92a2a'));
+    }
+
     FIELDS.forEach(function (field) {
-      var selKey = field + 'Selector';
+      var pathKey = field + 'Path';
+      var path = state.cfg[pathKey];
       var status = document.createElement('div');
       status.style.cssText = 'margin-top:10px;margin-bottom:4px;';
-      var rawCount = 0;
-      if (state.cfg[selKey]) { try { rawCount = document.querySelectorAll(state.cfg[selKey]).length; } catch (e) { rawCount = 0; } }
-      var count = state.cfg[selKey] ? fieldEls(field).length : 0;
-      var skip = state.cfg[field + 'Skip'] || 0;
+      var resolvedCount = path ? fieldElsViaRows(field).filter(Boolean).length : 0;
       var label = FIELD_LABELS[field] + (OPTIONAL_FIELDS[field] ? ' (optional)' : '');
-      status.textContent = label + ': ' + (state.cfg[selKey]
-        ? ('✅ set (' + count + ' found on this page' + (skip ? ', after skipping ' + skip + ' of ' + rawCount + ' total matches' : '') + ')')
+      status.textContent = label + ': ' + (path
+        ? ('✅ set (' + resolvedCount + ' of ' + rowCount + ' row(s) have a value)')
         : '❌ not set');
       body.appendChild(status);
-
-      if (state.cfg[selKey] && (count === 0 || skip > 0)) {
-        var skipRow = document.createElement('div');
-        skipRow.style.cssText = 'font-size:11px;color:#aaa;margin-bottom:4px;';
-        skipRow.appendChild(document.createTextNode('Skip count: '));
-        var skipInput = numberInput(skip, function (v) {
-          state.cfg[field + 'Skip'] = Math.max(0, v);
-          persist();
-          renderSetup();
-        }, '45px');
-        skipRow.appendChild(skipInput);
-        if (count === 0) {
-          skipRow.appendChild(document.createTextNode(rawCount === 0
-            ? ' — 0 total matches even before skipping: the selector itself isn\'t matching anything right now. Re-pick this field.'
-            : ' — try lowering this (it\'s currently skipping all ' + rawCount + ' match(es) found).'));
-        }
-        body.appendChild(skipRow);
-      }
 
       var row = document.createElement('div');
       row.appendChild(button('🎯 Pick ' + FIELD_LABELS[field] + ' value', function () {
@@ -594,22 +708,14 @@
         msg.textContent = 'Now click the ' + FIELD_LABELS[field] + ' value in the FIRST row of the list (Esc to cancel)...';
         body.appendChild(msg);
         startPicking(field, function (el) {
-          var sel = pickBestSelector(el);
-          var matches = document.querySelectorAll(sel);
-          var idx = Array.prototype.indexOf.call(matches, el);
-          state.cfg[selKey] = sel;
-          // You always click the first real row, so any earlier matches for
-          // this selector (e.g. a column-header label sharing the same
-          // styling/class) are noise — skip that many on every extraction.
-          state.cfg[field + 'Skip'] = idx > 0 ? idx : 0;
-          persist();
+          var result = handleFieldPick(field, el);
+          if (result.message) alert(result.message);
           renderSetup();
         });
       }));
-      if (state.cfg[selKey]) {
+      if (path) {
         row.appendChild(button('Clear', function () {
-          state.cfg[selKey] = '';
-          state.cfg[field + 'Skip'] = 0;
+          state.cfg[pathKey] = null;
           persist();
           renderSetup();
         }, '#495057'));
@@ -676,9 +782,9 @@
       var lines = parsed.rows.slice(0, 6).map(function (r) {
         return 'ID=' + r.id + ' | Brand=' + r.brand + ' | Vendor=' + (r.vendor || '(none)') + ' | Category=' + (r.category || '(none)') + ' | SKUs=' + (r.skus || '(none)');
       });
-      var mismatch = FIELDS.filter(function (f) { return state.cfg[f + 'Selector'] && parsed.counts[f] !== parsed.counts.id; });
+      var mismatch = FIELDS.filter(function (f) { return state.cfg[f + 'Path'] && parsed.counts[f] < parsed.totalRows; });
       var extra = mismatch.length
-        ? '\n\n⚠ ' + mismatch.map(function (f) { return FIELD_LABELS[f] + '=' + parsed.counts[f]; }).join(', ') + ' vs ID=' + parsed.counts.id + ' — some fields may not line up. Try re-picking.'
+        ? '\n\n⚠ ' + mismatch.map(function (f) { return FIELD_LABELS[f] + ' has a value on ' + parsed.counts[f] + ' of ' + parsed.totalRows + ' row(s)'; }).join('; ') + ' — some rows may be missing that field, or it needs re-picking.'
         : '';
       alert(lines.length ? ('First rows parsed as:\n\n' + lines.join('\n') + extra) : 'No rows parsed — try picking again.');
     }, '#495057'));
@@ -752,7 +858,7 @@
       body.innerHTML = '';
       var msg = document.createElement('div');
       msg.style.marginBottom = '6px';
-      var cols = 'ID, Brand, Vendor, Category' + (state.cfg.skusSelector ? ', No. of SKUs' : '');
+      var cols = 'ID, Brand, Vendor, Category' + (state.cfg.skusPath ? ', No. of SKUs' : '');
       msg.textContent = ok
         ? '✅ Copied to clipboard — paste into Google Sheets (columns: ' + cols + ').'
         : '⚠️ Auto-copy blocked by the browser. Select all text below and copy manually:';
