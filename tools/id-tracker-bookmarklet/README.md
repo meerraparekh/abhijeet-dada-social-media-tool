@@ -11,6 +11,9 @@ What it does:
 - Reads ID, Brand, Vendor and Category straight off the page (no more
   selecting and copying by hand) — works whether the list is a real HTML
   table or a div/card-based grid.
+- Can optionally also read "No. of SKUs" (e.g. the `3` in "Pending
+  Variants (3)") if you choose to pick that field too — otherwise that
+  column stays manual, same as today.
 - Remembers everything you've collected as you click "Next" and move
   through pages, and removes duplicates automatically.
 - Drops rows with a blank Brand (same as your current Excel filter step).
@@ -43,14 +46,18 @@ do this once — it keeps working after this.
 2. Click the **ID Tracker** bookmark. A small panel appears in the top
    right of the page.
 3. Click **🎯 Setup fields** once, on the first page only. For each field
-   (ID, Brand, Vendor, Category):
+   (ID, Brand, Vendor, Category, No. of SKUs):
    - Click **🎯 Pick \<Field\> value**, then click the matching value in the
      **first row** of the list on the page itself (e.g. click "45798" for
      ID, "Party Centre" for Brand, "PARTY CENTRE LLC" for Vendor,
-     "Costumes" for Category). Press `Esc` if you click the wrong thing.
-   - Vendor and Category are optional — if the list doesn't show them,
-     leave those two unset; you'll be asked for them once per brand
-     instead at the end (see step 8).
+     "Costumes" for Category, or the "Pending Variants (3)" badge for
+     No. of SKUs — it automatically pulls out just the `3`). Press `Esc`
+     if you click the wrong thing.
+   - Vendor, Category and No. of SKUs are all optional — if the list
+     doesn't show a field, or you'd rather keep filling it in by hand,
+     leave it unset. Vendor/Category then fall back to asking you once
+     per brand at the end (see step 8); No. of SKUs simply stays out of
+     the pasted block if left unset.
    - Click **👁 Preview parsed rows** to confirm it read the first few rows
      correctly, then **← Back**. (This setup is remembered — you only
      need to redo it if the tool's page layout changes.)
@@ -70,7 +77,8 @@ do this once — it keeps working after this.
    - It then copies a ready-to-paste block to your clipboard.
 9. Go to the Google Sheet tracker, click the top-left cell of the ID
    column, and paste (`Ctrl+V` / `Cmd+V`). ID, Brand, Vendor and Category
-   land in their columns automatically; fill in "No. of Child" as usual.
+   land in their columns automatically (plus No. of SKUs, if you picked
+   that field); fill in "No. of Child" by hand if you didn't.
 
 Use **🏷 Vendor/Category list** any time to review or correct what it has
 remembered. **🧹 Clear collected IDs** starts a fresh batch (e.g. for your

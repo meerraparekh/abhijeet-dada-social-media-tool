@@ -111,7 +111,7 @@
 
   // ---------- data extraction ----------
 
-  var FIELDS = ['id', 'brand', 'vendor', 'category'];
+  var FIELDS = ['id', 'brand', 'vendor', 'category', 'skus'];
 
   function selectorsConfigured() {
     return !!(state.cfg.idSelector && state.cfg.brandSelector);
@@ -123,17 +123,30 @@
     try { return Array.prototype.slice.call(document.querySelectorAll(sel)); } catch (e) { return []; }
   }
 
+  // "No. of SKUs" is usually shown as e.g. "Pending Variants (3)" — pull out just the count.
+  function extractFieldValue(field, el) {
+    if (!el) return '';
+    var raw = textOf(el);
+    if (field === 'skus') {
+      var paren = raw.match(/\((\d+)\)/);
+      if (paren) return paren[1];
+      var digits = raw.match(/\d+/);
+      return digits ? digits[0] : raw;
+    }
+    return raw;
+  }
+
   function parseCurrentPage() {
     if (!selectorsConfigured()) return { rows: [], counts: {}, configured: false };
     var elsByField = {};
     FIELDS.forEach(function (f) { elsByField[f] = fieldEls(f); });
-    // Row count is driven by ID/Brand (the required fields); Vendor/Category are optional extras.
+    // Row count is driven by ID/Brand (the required fields); the rest are optional extras.
     var n = Math.min(elsByField.id.length, elsByField.brand.length);
     var rows = [];
     for (var i = 0; i < n; i++) {
       var row = {};
       FIELDS.forEach(function (f) {
-        row[f] = elsByField[f][i] ? textOf(elsByField[f][i]) : '';
+        row[f] = extractFieldValue(f, elsByField[f][i]);
       });
       rows.push(row);
     }
@@ -148,7 +161,7 @@
     parsed.rows.forEach(function (r) {
       if (!r.id || !r.brand) { skippedBlank++; return; }
       if (!state.rows[r.id]) added++;
-      state.rows[r.id] = { id: r.id, brand: r.brand, vendor: r.vendor, category: r.category };
+      state.rows[r.id] = { id: r.id, brand: r.brand, vendor: r.vendor, category: r.category, skus: r.skus };
       // Directly-scraped Vendor/Category are authoritative — keep the brand memory fresh from them.
       if (r.vendor || r.category) {
         state.vendorMap[brandKey(r.brand)] = { brand: r.brand, vendor: r.vendor, category: r.category };
@@ -184,11 +197,14 @@
   }
 
   function buildTSV() {
+    var includeSkus = !!state.cfg.skusSelector;
     var lines = [];
     Object.keys(state.rows).forEach(function (id) {
       var r = state.rows[id];
       var eff = effectiveVendorCategory(r);
-      lines.push([r.id, r.brand, eff.vendor, eff.category].join('\t'));
+      var cols = [r.id, r.brand, eff.vendor, eff.category];
+      if (includeSkus) cols.push(r.skus || '');
+      lines.push(cols.join('\t'));
     });
     return lines.join('\n');
   }
@@ -332,8 +348,8 @@
     if (pickCleanup) pickCleanup();
   }
 
-  var FIELD_LABELS = { id: 'ID', brand: 'Brand', vendor: 'Vendor', category: 'Category' };
-  var OPTIONAL_FIELDS = { vendor: true, category: true };
+  var FIELD_LABELS = { id: 'ID', brand: 'Brand', vendor: 'Vendor', category: 'Category', skus: 'No. of SKUs' };
+  var OPTIONAL_FIELDS = { vendor: true, category: true, skus: true };
 
   function renderSetup() {
     stopPicking();
@@ -341,7 +357,7 @@
 
     var info = document.createElement('div');
     info.style.marginBottom = '8px';
-    info.innerHTML = 'Click a button below, then click the matching value <u>on the page</u> (in the first row). Press Esc to cancel. ID and Brand are required; Vendor and Category are optional — leave unset if this page doesn\'t show them, and you\'ll be asked for them once per brand instead.';
+    info.innerHTML = 'Click a button below, then click the matching value <u>on the page</u> (in the first row). Press Esc to cancel. ID and Brand are required; Vendor and Category are optional — leave unset if this page doesn\'t show them, and you\'ll be asked for them once per brand instead. No. of SKUs is optional too — leave it unset to keep filling that in by hand, or pick it (e.g. the number in "Pending Variants (3)") to add it as a 5th column automatically.';
     body.appendChild(info);
 
     FIELDS.forEach(function (field) {
@@ -380,7 +396,7 @@
       var parsed = parseCurrentPage();
       if (!parsed.configured) { alert('Set up ID and Brand fields first.'); return; }
       var lines = parsed.rows.slice(0, 6).map(function (r) {
-        return 'ID=' + r.id + ' | Brand=' + r.brand + ' | Vendor=' + (r.vendor || '(none)') + ' | Category=' + (r.category || '(none)');
+        return 'ID=' + r.id + ' | Brand=' + r.brand + ' | Vendor=' + (r.vendor || '(none)') + ' | Category=' + (r.category || '(none)') + ' | SKUs=' + (r.skus || '(none)');
       });
       var mismatch = FIELDS.filter(function (f) { return state.cfg[f + 'Selector'] && parsed.counts[f] !== parsed.counts.id; });
       var extra = mismatch.length
@@ -458,8 +474,9 @@
       body.innerHTML = '';
       var msg = document.createElement('div');
       msg.style.marginBottom = '6px';
+      var cols = 'ID, Brand, Vendor, Category' + (state.cfg.skusSelector ? ', No. of SKUs' : '');
       msg.textContent = ok
-        ? '✅ Copied to clipboard — paste into Google Sheets (columns: ID, Brand, Vendor, Category).'
+        ? '✅ Copied to clipboard — paste into Google Sheets (columns: ' + cols + ').'
         : '⚠️ Auto-copy blocked by the browser. Select all text below and copy manually:';
       body.appendChild(msg);
       if (!ok) {
