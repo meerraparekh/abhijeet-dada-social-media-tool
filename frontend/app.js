@@ -140,6 +140,18 @@ function renderClipCard(session, clip) {
     </div>
     <div class="hook">"${escapeHtml(clip.hook_hi)}"<br/>"${escapeHtml(clip.hook_en)}"</div>
     <div class="row">
+      <div class="times">
+        <label>Hook start (s)</label>
+        <input type="number" step="0.1" class="f-hook-start" value="${(clip.hook_start_seconds ?? clip.start_seconds).toFixed(1)}" />
+        <button class="secondary set-from-player" data-target="hookStart">Set from player</button>
+      </div>
+      <div class="times">
+        <label>Hook end (s)</label>
+        <input type="number" step="0.1" class="f-hook-end" value="${(clip.hook_end_seconds ?? clip.start_seconds).toFixed(1)}" />
+        <button class="secondary set-from-player" data-target="hookEnd">Set from player</button>
+      </div>
+    </div>
+    <div class="row">
       <div><label>YouTube title (Hindi)</label><input type="text" class="f-yt-title-hi" value="${escapeAttr(clip.youtube_title_hi)}" /></div>
       <div><label>YouTube title (English)</label><input type="text" class="f-yt-title-en" value="${escapeAttr(clip.youtube_title_en)}" /></div>
     </div>
@@ -157,6 +169,7 @@ function renderClipCard(session, clip) {
     <div class="row" style="align-items:center">
       <div class="platform-row">${platformCheckboxes}</div>
       <label><input type="checkbox" class="remove-silence-cb" checked /> Remove silence/gaps</label>
+      <label><input type="checkbox" class="remove-fillers-cb" /> Remove filler words &amp; mistakes (AI, small extra cost)</label>
       <button class="render-btn">Render selected</button>
       <div class="download-links">${downloads}</div>
     </div>
@@ -173,6 +186,8 @@ function renderClipCard(session, clip) {
 
   card.querySelector(".f-start").onchange = (e) => save({ start_seconds: parseFloat(e.target.value) });
   card.querySelector(".f-end").onchange = (e) => save({ end_seconds: parseFloat(e.target.value) });
+  card.querySelector(".f-hook-start").onchange = (e) => save({ hook_start_seconds: parseFloat(e.target.value) });
+  card.querySelector(".f-hook-end").onchange = (e) => save({ hook_end_seconds: parseFloat(e.target.value) });
   card.querySelector(".f-status").onchange = (e) => save({ status: e.target.value });
   card.querySelector(".f-assignee").onchange = (e) => save({ assignee: e.target.value });
   card.querySelector(".f-yt-title-hi").onchange = (e) => save({ youtube_title_hi: e.target.value });
@@ -184,12 +199,18 @@ function renderClipCard(session, clip) {
   card.querySelector(".f-hashtags").onchange = (e) =>
     save({ hashtags: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) });
 
+  const TIME_TARGETS = {
+    start: { selector: ".f-start", field: "start_seconds" },
+    end: { selector: ".f-end", field: "end_seconds" },
+    hookStart: { selector: ".f-hook-start", field: "hook_start_seconds" },
+    hookEnd: { selector: ".f-hook-end", field: "hook_end_seconds" },
+  };
   card.querySelectorAll(".set-from-player").forEach((btn) => {
     btn.onclick = () => {
       const player = document.getElementById("player");
-      const field = btn.dataset.target === "start" ? card.querySelector(".f-start") : card.querySelector(".f-end");
-      field.value = player.currentTime.toFixed(1);
-      save({ [btn.dataset.target === "start" ? "start_seconds" : "end_seconds"]: player.currentTime });
+      const { selector, field } = TIME_TARGETS[btn.dataset.target];
+      card.querySelector(selector).value = player.currentTime.toFixed(1);
+      save({ [field]: player.currentTime });
     };
   });
 
@@ -197,12 +218,13 @@ function renderClipCard(session, clip) {
     const platforms = [...card.querySelectorAll(".platform-cb:checked")].map((c) => c.value);
     if (!platforms.length) { alert("Pick at least one platform"); return; }
     const removeSilence = card.querySelector(".remove-silence-cb").checked;
+    const removeFillers = card.querySelector(".remove-fillers-cb").checked;
     const note = card.querySelector(".render-note");
     note.textContent = "Rendering...";
     const { job_id } = await api(`/api/sessions/${session.id}/clips/${clip.id}/render`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ platforms, remove_silence: removeSilence }),
+      body: JSON.stringify({ platforms, remove_silence: removeSilence, remove_fillers: removeFillers }),
     });
     pollJob(job_id, (job) => {
       note.textContent = job.state === "running" ? job.progress || "rendering..." : "";

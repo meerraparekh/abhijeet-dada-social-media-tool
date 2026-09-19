@@ -81,10 +81,13 @@ nothing to install.
 
 ## What this costs
 
-Transcription and video rendering are free (local, open-source). Two steps
-call the Claude API: suggesting clips (reads the transcript, picks moments),
-and translating the transcript to English for burned-in captions (reads and
-rewrites essentially the whole transcript, so it costs more per session):
+Transcription, silence removal, and video rendering are all free (local,
+open-source). Three things call the Claude API: suggesting clips (reads the
+transcript, picks moments), translating the transcript to English for
+burned-in captions (reads and rewrites essentially the whole transcript, so
+it costs more per session), and - only if you turn on "Remove filler words &
+mistakes" when rendering a clip - a small per-clip call to flag filler
+words/false starts:
 
 | | Per session (~2 hrs) | 5 sessions/month |
 |---|---|---|
@@ -92,6 +95,7 @@ rewrites essentially the whole transcript, so it costs more per session):
 | Translate captions (Sonnet 5) | ≈ $0.30 | ≈ $1.50 |
 | **Total (Sonnet 5, default)** | **≈ $0.40** | **≈ $2.00** |
 | Total on Claude Opus 5 (higher quality, costs more) | ≈ $1.00 | ≈ $5.00 |
+| Remove filler words & mistakes, if used (per clip, not per session) | ≈ $0.01-0.02 | negligible even used on every clip |
 
 Change the model via `SATSANG_CLAUDE_MODEL` (defaults to `claude-sonnet-5`).
 Even with a generous buffer for retries or longer sessions, expect well

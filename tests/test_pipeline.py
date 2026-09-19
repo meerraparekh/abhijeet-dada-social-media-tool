@@ -68,6 +68,8 @@ def client(tmp_path, monkeypatch):
                     title="Opening",
                     hook_hi="आज शाम सभी का स्वागत है।",
                     hook_en="Welcome everyone to this evening's session.",
+                    hook_start_seconds=0.0,
+                    hook_end_seconds=2.0,
                     youtube_title_hi="स्थिरता पर एक बात",
                     youtube_title_en="A Talk on Stillness",
                     instagram_caption_hi="आज रात का पहला विचार 🙏",

@@ -28,6 +28,8 @@ _CLIP_SUGGESTIONS_SCHEMA = {
                     "title": {"type": "string"},
                     "hook_hi": {"type": "string"},
                     "hook_en": {"type": "string"},
+                    "hook_start_seconds": {"type": "number"},
+                    "hook_end_seconds": {"type": "number"},
                     "youtube_title_hi": {"type": "string"},
                     "youtube_title_en": {"type": "string"},
                     "instagram_caption_hi": {"type": "string"},
@@ -42,6 +44,8 @@ _CLIP_SUGGESTIONS_SCHEMA = {
                     "title",
                     "hook_hi",
                     "hook_en",
+                    "hook_start_seconds",
+                    "hook_end_seconds",
                     "youtube_title_hi",
                     "youtube_title_en",
                     "instagram_caption_hi",
@@ -84,8 +88,11 @@ youtube_title, instagram_caption, and twitter_text, provide an "_hi" version
 and an "_en" version. hook_hi specifically must be an exact, verbatim quote
 copied from the transcript within that clip's time range - not a paraphrase,
 summary, or invented line - since it's shown to viewers as a direct quote.
-hook_en is a natural English translation of that same exact quote. The other
-fields (youtube_title, instagram_caption, twitter_text) are your own writing,
+hook_en is a natural English translation of that same exact quote.
+hook_start_seconds/hook_end_seconds are the real transcript timestamps where
+that exact quote begins and ends (usually at or near the clip's own
+start_seconds, but give the quote's own precise span, not the whole clip's).
+The other fields (youtube_title, instagram_caption, twitter_text) are your own writing,
 not quotes - natural Hindi for "_hi", a natural English rendering for "_en",
 not a stiff word-for-word translation.
 

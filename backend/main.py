@@ -19,7 +19,7 @@ from pydantic import BaseModel
 import jobs
 import store
 from schemas import Clip, Session
-from services import clip_suggester, clipper, transcribe, translator
+from services import clip_suggester, clipper, filler_detector, transcribe, translator
 
 app = FastAPI(title="Satsang Clips")
 
@@ -155,6 +155,8 @@ class ClipUpdate(BaseModel):
     title: Optional[str] = None
     hook_hi: Optional[str] = None
     hook_en: Optional[str] = None
+    hook_start_seconds: Optional[float] = None
+    hook_end_seconds: Optional[float] = None
     youtube_title_hi: Optional[str] = None
     youtube_title_en: Optional[str] = None
     instagram_caption_hi: Optional[str] = None
@@ -205,6 +207,10 @@ def delete_clip(session_id: str, clip_id: str) -> dict:
 class RenderRequest(BaseModel):
     platforms: List[str]
     remove_silence: bool = True
+    # Off by default: unlike silence removal this makes a small Claude API
+    # call per clip (a few cents at most, but real cost, unlike the free
+    # local silence detection), so it's opt-in rather than automatic.
+    remove_fillers: bool = False
 
 
 @app.post("/api/sessions/{session_id}/clips/{clip_id}/render")
@@ -233,11 +239,20 @@ def render_clip(session_id: str, clip_id: str, req: RenderRequest) -> dict:
     def work(progress_cb):
         s = store.load(session_id)
         c = next(x for x in s.clips if x.id == clip_id)
+
+        extra_cut_ranges = None
+        if req.remove_fillers:
+            progress_cb("asking Claude to flag filler words/mistakes")
+            extra_cut_ranges = filler_detector.detect_removable_spans(
+                words, c.start_seconds, c.end_seconds
+            )
+
         for platform in req.platforms:
             progress_cb(f"rendering {platform}")
             out_path = clipper.render_clip_for_platform(
                 raw_video_path, c, platform, words, clips_dir,
                 remove_silence=req.remove_silence, caption_words=caption_words,
+                extra_cut_ranges=extra_cut_ranges,
             )
             c.rendered_files[platform] = str(out_path.relative_to(store.session_dir(session_id)))
         c.status = "done"

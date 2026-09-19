@@ -34,6 +34,69 @@ def _run(cmd: List[str], cwd: Path | None = None) -> None:
         raise RuntimeError(f"ffmpeg failed ({' '.join(cmd)}):\n{result.stdout[-4000:]}")
 
 
+def find_silence_gaps(
+    words: List[TranscriptWord],
+    start: float,
+    end: float,
+    max_gap: float = DEFAULT_MAX_GAP_SECONDS,
+) -> List[Tuple[float, float]]:
+    """Return the (start, end) gaps between words inside [start, end) that
+    are longer than max_gap - the raw video's original timeline."""
+    in_range = sorted(
+        (w for w in words if w.end > start and w.start < end), key=lambda w: w.start
+    )
+    if not in_range:
+        return []  # no word timing to work with - leave the range untouched
+    gaps: List[Tuple[float, float]] = []
+    prev_end = start
+    for w in in_range:
+        w_start = max(w.start, start)
+        if w_start - prev_end > max_gap:
+            gaps.append((prev_end, w_start))
+        prev_end = max(prev_end, min(w.end, end))
+    if end - prev_end > max_gap:
+        gaps.append((prev_end, end))
+    return gaps
+
+
+def merge_and_pad_cut_ranges(
+    start: float,
+    end: float,
+    cut_ranges: List[Tuple[float, float]],
+    pad: float = DEFAULT_GAP_PADDING_SECONDS,
+) -> List[Tuple[float, float]]:
+    """Given arbitrary (possibly overlapping) ranges to cut out of
+    [start, end) - silence gaps, AI-flagged filler words, or any future
+    source - merge overlapping/adjacent cuts, shrink each by `pad` on both
+    sides so words right at a cut boundary aren't clipped (a cut smaller
+    than 2*pad is skipped entirely, since it's not worth the risk), and
+    return the resulting kept stretches. Falls back to the whole
+    [start, end) range untouched if there's nothing to cut."""
+    clipped = sorted(
+        (max(start, c[0]), min(end, c[1])) for c in cut_ranges if c[1] > start and c[0] < end and c[1] > c[0]
+    )
+    merged: List[List[float]] = []
+    for cs, ce in clipped:
+        if merged and cs <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], ce)
+        else:
+            merged.append([cs, ce])
+
+    segments: List[Tuple[float, float]] = []
+    cursor = start
+    for cs, ce in merged:
+        eff_start = cs + pad
+        eff_end = ce - pad
+        if eff_end <= eff_start:
+            continue  # cut too small relative to padding to bother with
+        if eff_start > cursor:
+            segments.append((cursor, eff_start))
+        cursor = max(cursor, eff_end)
+    if end > cursor:
+        segments.append((cursor, end))
+    return segments or [(start, end)]
+
+
 def compute_keep_segments(
     words: List[TranscriptWord],
     start: float,
@@ -41,33 +104,11 @@ def compute_keep_segments(
     max_gap: float = DEFAULT_MAX_GAP_SECONDS,
     pad: float = DEFAULT_GAP_PADDING_SECONDS,
 ) -> List[Tuple[float, float]]:
-    """Return the (start, end) stretches of [start, end) worth keeping, in the
-    raw video's original timeline, dropping any gap between words longer than
-    max_gap. Falls back to the whole [start, end) range untouched if there's
-    no word timing to work with (e.g. the clip is instrumental/silent)."""
-    in_range = sorted(
-        (w for w in words if w.end > start and w.start < end), key=lambda w: w.start
-    )
-    if not in_range:
-        return [(start, end)]
-
-    segments: List[Tuple[float, float]] = []
-    seg_start = start
-    prev_end = start
-    for w in in_range:
-        w_start = max(w.start, start)
-        w_end = min(w.end, end)
-        gap = w_start - prev_end
-        if gap > max_gap and gap - 2 * pad > 0:
-            seg_end = min(prev_end + pad, w_start - pad)
-            if seg_end > seg_start:
-                segments.append((seg_start, seg_end))
-            seg_start = max(w_start - pad, seg_end)
-        prev_end = max(prev_end, w_end)
-
-    if end > seg_start:
-        segments.append((seg_start, end))
-    return segments or [(start, end)]
+    """Silence-only convenience wrapper around find_silence_gaps +
+    merge_and_pad_cut_ranges, kept for callers that only care about gaps
+    (see render_clip_for_platform for the general multi-source case)."""
+    gaps = find_silence_gaps(words, start, end, max_gap=max_gap)
+    return merge_and_pad_cut_ranges(start, end, gaps, pad=pad)
 
 
 def build_time_remap(
@@ -95,22 +136,40 @@ def build_time_remap(
     return remap, total_duration
 
 
+def _segment_index(t: float, keep_segments: List[Tuple[float, float]]) -> int:
+    """Which keep_segment a raw-timeline timestamp falls into, or -1."""
+    for i, (s, e) in enumerate(keep_segments):
+        if s <= t <= e:
+            return i
+    return -1
+
+
 def _words_to_srt(
     words: List[TranscriptWord],
     start: float,
     end: float,
     words_per_line: int = 4,
     remap: Optional[Callable[[float], float]] = None,
-    break_gap: Optional[float] = None,
+    keep_segments: Optional[List[Tuple[float, float]]] = None,
 ) -> str:
     """Pack word-level timestamps inside [start, end) into short caption lines.
     Without `remap`, times are simply re-based so 0.0 = clip start. With
-    `remap` (used when silence has been cut out), times are translated into
-    the gap-removed output's own shorter timeline instead - and `break_gap`
-    must be passed too, so a caption line never straddles a cut point (which
-    would otherwise show words together that are actually separated by the
-    removed footage)."""
+    `remap` (used when footage has been cut, whether for silence or flagged
+    filler/mistakes), times are translated into the shorter output timeline
+    instead - and `keep_segments` must be passed too, both to drop any word
+    that's actually been cut out of the video (a filler-word cut targets a
+    real word, unlike a silence gap, so without this a removed "um" would
+    still show up as caption text for footage that no longer exists) and so
+    a caption line never straddles a cut point."""
     in_range = [w for w in words if w.start >= start and w.end <= end]
+    if keep_segments is not None:
+        # Check the word's midpoint, not its start - a cut's padding keeps a
+        # thin sliver of audio right at the edges of a removed word so the
+        # cut doesn't sound abrupt, which can leave a cut word's start just
+        # inside a kept segment even though most of the word is gone.
+        in_range = [
+            w for w in in_range if _segment_index((w.start + w.end) / 2, keep_segments) != -1
+        ]
     lines = []
     idx = 1
     chunk: List[TranscriptWord] = []
@@ -135,10 +194,10 @@ def _words_to_srt(
         idx += 1
 
     for w in in_range:
-        if chunk and (
-            len(chunk) >= words_per_line
-            or (break_gap is not None and w.start - chunk[-1].end > break_gap)
-        ):
+        crosses_cut = keep_segments is not None and _segment_index(
+            w.start, keep_segments
+        ) != _segment_index(chunk[-1].end if chunk else w.start, keep_segments)
+        if chunk and (len(chunk) >= words_per_line or crosses_cut):
             flush()
             chunk = []
         chunk.append(w)
@@ -179,21 +238,28 @@ def render_clip_for_platform(
     remove_silence: bool = True,
     max_gap_seconds: float = DEFAULT_MAX_GAP_SECONDS,
     caption_words: Optional[List[TranscriptWord]] = None,
+    extra_cut_ranges: Optional[List[Tuple[float, float]]] = None,
 ) -> Path:
     """`words` (the original-language, real per-word timing from Whisper) is
-    used to decide where the gaps are - that's the accurate source for what's
-    actually silence. `caption_words` (defaults to `words` if not given) is
-    what actually gets burned in as on-screen text - pass the English
-    translation's interpolated word timing here to caption in English while
-    still cutting gaps based on the real Hindi speech timing."""
+    used to decide where the silence gaps are - that's the accurate source
+    for what's actually silence. `caption_words` (defaults to `words` if not
+    given) is what actually gets burned in as on-screen text - pass the
+    English translation's interpolated word timing here to caption in
+    English while still cutting gaps based on the real Hindi speech timing.
+    `extra_cut_ranges` are additional (start, end) spans to cut regardless of
+    remove_silence - e.g. AI-flagged filler words/mistakes - combined with
+    the silence gaps into one set of cuts."""
     preset = PRESETS[platform]
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{clip.id}_{platform}.mp4"
     caption_words = caption_words if caption_words is not None else words
 
+    cut_ranges: List[Tuple[float, float]] = list(extra_cut_ranges or [])
+    if remove_silence:
+        cut_ranges += find_silence_gaps(words, clip.start_seconds, clip.end_seconds, max_gap=max_gap_seconds)
     keep_segments = (
-        compute_keep_segments(words, clip.start_seconds, clip.end_seconds, max_gap=max_gap_seconds)
-        if remove_silence
+        merge_and_pad_cut_ranges(clip.start_seconds, clip.end_seconds, cut_ranges)
+        if cut_ranges
         else [(clip.start_seconds, clip.end_seconds)]
     )
 
@@ -203,7 +269,7 @@ def render_clip_for_platform(
         if len(keep_segments) > 1:
             remap, _ = build_time_remap(keep_segments)
             srt_text = _words_to_srt(
-                caption_words, clip.start_seconds, clip.end_seconds, remap=remap, break_gap=max_gap_seconds
+                caption_words, clip.start_seconds, clip.end_seconds, remap=remap, keep_segments=keep_segments
             )
         else:
             srt_text = _words_to_srt(caption_words, clip.start_seconds, clip.end_seconds)

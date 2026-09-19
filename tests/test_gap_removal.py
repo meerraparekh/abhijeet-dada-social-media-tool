@@ -19,6 +19,7 @@ from schemas import Clip, TranscriptWord  # noqa: E402
 from services.clipper import (  # noqa: E402
     build_time_remap,
     compute_keep_segments,
+    merge_and_pad_cut_ranges,
     render_clip_for_platform,
 )
 
@@ -52,6 +53,20 @@ def test_compute_keep_segments_splits_on_long_gap():
 def test_compute_keep_segments_falls_back_with_no_words():
     segments = compute_keep_segments([], 10.0, 20.0)
     assert segments == [(10.0, 20.0)]
+
+
+def test_merge_and_pad_cut_ranges_merges_overlaps_and_skips_tiny_cuts():
+    # Two overlapping cuts should merge into one; a cut too small to survive
+    # padding on both sides should be skipped entirely (not just shrunk to zero).
+    cuts = [(2.0, 4.0), (3.5, 5.0), (7.0, 7.05)]
+    segments = merge_and_pad_cut_ranges(0.0, 10.0, cuts, pad=0.1)
+    # merged cut is (2.0, 5.0) -> padded removal is (2.1, 4.9); the 0.05s cut
+    # at 7.0 is smaller than 2*pad so it's left alone entirely.
+    assert segments == [(0.0, 2.1), (4.9, 10.0)]
+
+
+def test_merge_and_pad_cut_ranges_no_cuts_keeps_whole_range():
+    assert merge_and_pad_cut_ranges(5.0, 15.0, []) == [(5.0, 15.0)]
 
 
 def test_build_time_remap_shrinks_total_duration():
@@ -101,3 +116,45 @@ def test_gap_removal_shortens_the_rendered_clip(tmp_path):
     # one should be meaningfully shorter (most of the ~5s gap cut out).
     assert duration_without_removal == pytest.approx(11.0, abs=0.5)
     assert duration_with_removal < duration_without_removal - 3.0
+
+
+@pytest.mark.skipif(not Path(TEST_VIDEO).exists(), reason=f"no test video at {TEST_VIDEO}")
+def test_extra_cut_ranges_shortens_the_rendered_clip(tmp_path):
+    # No silence gaps here (words are back-to-back) - the only cut comes from
+    # extra_cut_ranges, simulating an AI-flagged filler word/mistake span.
+    words = _words((0.0, 1.0), (1.0, 2.0), (2.0, 3.0), (5.0, 6.0), (6.0, 7.0))
+    clip = Clip(start_seconds=0.0, end_seconds=7.0, title="t")
+
+    out_path = render_clip_for_platform(
+        Path(TEST_VIDEO), clip, "youtube", words, tmp_path / "with_cut",
+        remove_silence=False, extra_cut_ranges=[(3.0, 5.0)],
+    )
+    out_path2 = render_clip_for_platform(
+        Path(TEST_VIDEO), clip, "youtube", words, tmp_path / "without_cut",
+        remove_silence=False,
+    )
+
+    assert _probe_duration(out_path2) == pytest.approx(7.0, abs=0.5)
+    assert _probe_duration(out_path) < _probe_duration(out_path2) - 1.0
+
+
+@pytest.mark.skipif(not Path(TEST_VIDEO).exists(), reason=f"no test video at {TEST_VIDEO}")
+def test_a_cut_word_never_survives_in_the_burned_captions(tmp_path):
+    # Regression test: a filler-word cut targets an actual word (unlike a
+    # silence gap, which by definition has no word in it) - that word must
+    # not still appear as caption text for video footage that's been cut.
+    words = [
+        TranscriptWord(start=0.0, end=0.5, word=" So"),
+        TranscriptWord(start=0.6, end=1.0, word=" um"),
+        TranscriptWord(start=1.3, end=2.0, word=" today"),
+        TranscriptWord(start=2.1, end=2.8, word=" we"),
+    ]
+    clip = Clip(start_seconds=0.0, end_seconds=3.0, title="t")
+
+    render_clip_for_platform(
+        Path(TEST_VIDEO), clip, "instagram_reel", words, tmp_path,
+        remove_silence=False, extra_cut_ranges=[(0.5, 1.1)],
+    )
+    srt_text = next(tmp_path.glob("*.srt")).read_text(encoding="utf-8")
+    assert "um" not in srt_text.split()
+    assert "So" in srt_text and "today" in srt_text and "we" in srt_text

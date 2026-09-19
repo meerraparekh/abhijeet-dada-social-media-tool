@@ -30,6 +30,8 @@ class ClipSuggestion(BaseModel):
     # wanted in both languages so either can be used depending on the audience.
     hook_hi: str = Field(description="The exact opening line, verbatim from the transcript, that makes this clip worth stopping to watch, in Hindi - not a paraphrase or invented line")
     hook_en: str = Field(description="Natural English translation of hook_hi (same quote, not independently reworded)")
+    hook_start_seconds: float = Field(description="Real transcript timestamp where the hook_hi quote begins")
+    hook_end_seconds: float = Field(description="Real transcript timestamp where the hook_hi quote ends")
     youtube_title_hi: str = Field(description="A YouTube-style title for this clip in Hindi, under 100 characters")
     youtube_title_en: str = Field(description="English translation of youtube_title_hi, under 100 characters")
     instagram_caption_hi: str = Field(description="A ready-to-post Instagram Reel caption in Hindi, 1-3 sentences")
@@ -74,6 +76,8 @@ class Clip(BaseModel):
     title: str = ""
     hook_hi: str = ""
     hook_en: str = ""
+    hook_start_seconds: Optional[float] = None
+    hook_end_seconds: Optional[float] = None
     youtube_title_hi: str = ""
     youtube_title_en: str = ""
     instagram_caption_hi: str = ""
