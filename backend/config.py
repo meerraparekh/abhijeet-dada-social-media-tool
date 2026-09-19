@@ -28,6 +28,13 @@ WHISPER_CPU_THREADS = int(os.environ.get("WHISPER_CPU_THREADS", max(1, (os.cpu_c
 # unnoticeable accuracy cost for this use case (finding clip-worthy moments,
 # not a verbatim legal transcript).
 WHISPER_BEAM_SIZE = int(os.environ.get("WHISPER_BEAM_SIZE", "1"))
+# Hindi and Urdu are close to the same spoken language but written in
+# completely different scripts (Devanagari vs. Perso-Arabic) - Whisper's
+# auto language-detection can guess wrong between them, and got it wrong in
+# real-world testing (transcript came out in Urdu script for Hindi speech).
+# Force it rather than relying on auto-detect. Set to "" to go back to
+# auto-detection (e.g. for a genuinely multi-language/unknown session).
+WHISPER_LANGUAGE = os.environ.get("WHISPER_LANGUAGE", "hi") or None
 
 # Claude model used to turn a transcript into clip suggestions.
 CLAUDE_MODEL = os.environ.get("SATSANG_CLAUDE_MODEL", "claude-sonnet-5")

@@ -114,6 +114,7 @@ however you like.
 | `ANTHROPIC_API_KEY` | - | required for the "Suggest clips" step |
 | `SATSANG_CLAUDE_MODEL` | `claude-sonnet-5` | model used for clip suggestions |
 | `WHISPER_MODEL_SIZE` | `base` | faster-whisper model size. `base` comfortably beats real-time on a modern CPU; `small` is more accurate but real-world testing showed it running *slower than real-time* even after the thread/decoding tuning below - only use it if `base`'s accuracy isn't good enough for you; `medium`/`large-v3` need a decent GPU |
+| `WHISPER_LANGUAGE` | `hi` | Forces transcription language. Hindi and Urdu are close to the same spoken language but use different scripts, and Whisper's auto-detection can guess wrong between them (it did, in testing) - forcing `hi` avoids that. Set to empty (`WHISPER_LANGUAGE=`) to go back to auto-detection for a different/mixed-language session |
 | `WHISPER_CPU_THREADS` | (cores - 1) | CPU threads faster-whisper uses. It doesn't auto-detect this well, so we default to nearly all your cores - lower it if transcription is starving other apps |
 | `WHISPER_BEAM_SIZE` | `1` (greedy) | Whisper's decoding is largely sequential and is the real CPU bottleneck, not thread count - greedy decoding (1) is several times faster than the library default of 5, at a small, usually unnoticeable accuracy cost for this use case. Raise it (e.g. `5`) only if you notice the transcript quality actually suffering |
 | `SATSANG_DATA_DIR` | `./data` | where sessions/transcripts/clips are stored |

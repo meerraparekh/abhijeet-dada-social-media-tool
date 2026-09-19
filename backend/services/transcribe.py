@@ -13,6 +13,7 @@ from config import (
     WHISPER_COMPUTE_TYPE,
     WHISPER_CPU_THREADS,
     WHISPER_DEVICE,
+    WHISPER_LANGUAGE,
     WHISPER_MODEL_SIZE,
 )
 from schemas import Transcript, TranscriptSegment, TranscriptWord
@@ -43,6 +44,7 @@ def transcribe(video_path: str, progress_cb: Optional[Callable[[str], None]] = N
         word_timestamps=True,
         vad_filter=True,  # skip long silences, which a 2-hour recording usually has plenty of
         beam_size=WHISPER_BEAM_SIZE,
+        language=WHISPER_LANGUAGE,
     )
 
     segments = []

@@ -71,15 +71,23 @@ Find 8-15 moments that work as standalone clips of roughly 45-120 seconds each:
 - Spread clips across the whole session rather than clustering them in one part.
 - Do not overlap clips.
 - start_seconds and end_seconds must be real timestamps taken from the transcript
-  you were given, not estimates.
+  you were given, not estimates. Double check that the text actually spoken
+  between start_seconds and end_seconds in the transcript you were given is
+  what you describe below - don't pick a timestamp range and then write a hook
+  that doesn't match what's actually said there.
 
 The on-screen captions burned into the video are handled separately (a full
 English translation, not written by you) - what you ARE writing is the text
 that goes in the post itself (title/caption/tweet), wanted in BOTH Hindi and
 English so either can be used depending on the audience: for each of hook,
 youtube_title, instagram_caption, and twitter_text, provide an "_hi" version
-(natural Hindi, not a stiff literal translation) and an "_en" version (a
-natural English rendering of the same content, not a word-for-word translation).
+and an "_en" version. hook_hi specifically must be an exact, verbatim quote
+copied from the transcript within that clip's time range - not a paraphrase,
+summary, or invented line - since it's shown to viewers as a direct quote.
+hook_en is a natural English translation of that same exact quote. The other
+fields (youtube_title, instagram_caption, twitter_text) are your own writing,
+not quotes - natural Hindi for "_hi", a natural English rendering for "_en",
+not a stiff word-for-word translation.
 
 Keep every field concise - a short internal title, a one-line hook, a punchy
 YouTube title, a 1-2 sentence Instagram caption, a tweet under 200 characters,

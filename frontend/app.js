@@ -49,6 +49,9 @@ async function renderMain() {
       <button class="secondary" id="deleteSessionBtn">Delete session</button>
     </div>
     <video id="player" controls src="/api/sessions/${session.id}/video"></video>
+    <div class="action-row" style="margin-top:4px">
+      <span>Current time: <strong id="playerSeconds">0.0</strong>s (use this to fill in Start/End below)</span>
+    </div>
     <div class="action-row">
       <button id="transcribeBtn" ${session.transcript ? "disabled" : ""}>Transcribe</button>
       <button id="suggestBtn" ${!session.transcript || session.clips.length ? "disabled" : ""}>Suggest clips</button>
@@ -65,6 +68,12 @@ async function renderMain() {
   document.getElementById("transcribeBtn").onclick = () => runJob(`/api/sessions/${session.id}/transcribe`, "POST");
   document.getElementById("suggestBtn").onclick = () => runJob(`/api/sessions/${session.id}/suggest-clips`, "POST");
   document.getElementById("translateBtn").onclick = () => runJob(`/api/sessions/${session.id}/translate-captions`, "POST");
+
+  const player = document.getElementById("player");
+  const secondsLabel = document.getElementById("playerSeconds");
+  const updateSecondsLabel = () => { secondsLabel.textContent = player.currentTime.toFixed(1); };
+  player.addEventListener("timeupdate", updateSecondsLabel);
+  player.addEventListener("seeking", updateSecondsLabel);
 
   renderClips(session);
 }

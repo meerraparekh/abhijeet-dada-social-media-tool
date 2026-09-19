@@ -24,12 +24,12 @@ class ClipSuggestion(BaseModel):
     start_seconds: float = Field(description="Clip start time in seconds from the start of the session")
     end_seconds: float = Field(description="Clip end time in seconds from the start of the session")
     title: str = Field(description="Short internal label for this clip, not shown to viewers")
-    # Social text is bilingual (Hindi + English) - the talk itself is in Hindi,
-    # and the burned-in on-screen captions stay in Hindi to match, but the
-    # posted title/caption/tweet text is wanted in both languages so either
-    # can be used depending on the audience.
-    hook_hi: str = Field(description="The opening line or moment that makes this clip worth stopping to watch, in Hindi")
-    hook_en: str = Field(description="English translation of hook_hi")
+    # Social text is bilingual (Hindi + English) - the talk itself is in Hindi
+    # (burned-in captions are a separate full English translation, handled by
+    # services/translator.py), but the posted title/caption/tweet text is
+    # wanted in both languages so either can be used depending on the audience.
+    hook_hi: str = Field(description="The exact opening line, verbatim from the transcript, that makes this clip worth stopping to watch, in Hindi - not a paraphrase or invented line")
+    hook_en: str = Field(description="Natural English translation of hook_hi (same quote, not independently reworded)")
     youtube_title_hi: str = Field(description="A YouTube-style title for this clip in Hindi, under 100 characters")
     youtube_title_en: str = Field(description="English translation of youtube_title_hi, under 100 characters")
     instagram_caption_hi: str = Field(description="A ready-to-post Instagram Reel caption in Hindi, 1-3 sentences")
