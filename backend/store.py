@@ -7,8 +7,11 @@ in-process lock around read-modify-write is enough concurrency safety.
 """
 import json
 import threading
+import warnings
 from pathlib import Path
 from typing import List, Optional
+
+import pydantic
 
 from config import SESSIONS_DIR
 from schemas import Session
@@ -45,11 +48,18 @@ def load(session_id: str) -> Optional[Session]:
 
 
 def list_all() -> List[Session]:
+    """List every session. A single corrupted/unreadable session.json (e.g.
+    left over from an interrupted write) must not take down the whole list -
+    skip it with a warning instead."""
     out = []
     for d in sorted(SESSIONS_DIR.iterdir(), reverse=True):
         f = d / "session.json"
-        if f.exists():
+        if not f.exists():
+            continue
+        try:
             out.append(Session.model_validate_json(f.read_text(encoding="utf-8")))
+        except (json.JSONDecodeError, pydantic.ValidationError, UnicodeDecodeError) as exc:
+            warnings.warn(f"Skipping unreadable session at {f}: {exc}")
     return out
 
 
