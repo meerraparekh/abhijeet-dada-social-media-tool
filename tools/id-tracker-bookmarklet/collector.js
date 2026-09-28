@@ -274,7 +274,7 @@
 
   // ---------- data extraction ----------
 
-  var FIELDS = ['id', 'brand', 'vendor', 'category', 'skus'];
+  var FIELDS = ['id', 'brand', 'vendor', 'category', 'skus', 'productLink'];
 
   function selectorsConfigured() {
     return !!(state.cfg.rowSelector && state.cfg.idPath && state.cfg.brandPath);
@@ -288,8 +288,16 @@
   }
 
   // "No. of SKUs" is usually shown as e.g. "Pending Variants (3)" — pull out just the count.
+  // "Product Link" pulls the href of the picked element (or its nearest <a>)
+  // instead of text — used by the separate category-enricher userscript to
+  // visit each product's detail page. It never appears in the pasted TSV.
   function extractFieldValue(field, el) {
     if (!el) return '';
+    if (field === 'productLink') {
+      var a = el.tagName === 'A' ? el : (el.closest ? el.closest('a') : null);
+      if (!a && el.querySelector) a = el.querySelector('a');
+      return (a && a.href) ? a.href : '';
+    }
     var raw = textOf(el);
     if (field === 'skus') {
       var paren = raw.match(/\((\d+)\)/);
@@ -324,7 +332,12 @@
     parsed.rows.forEach(function (r) {
       if (!r.id || !r.brand) { skippedBlank++; return; }
       if (!state.rows[r.id]) added++;
-      state.rows[r.id] = { id: r.id, brand: r.brand, vendor: r.vendor, category: r.category, skus: r.skus };
+      var existing = state.rows[r.id];
+      state.rows[r.id] = {
+        id: r.id, brand: r.brand, vendor: r.vendor, category: r.category, skus: r.skus,
+        // Keep a previously-captured link if this pass didn't pick one (e.g. Product Link left unset later).
+        productLink: r.productLink || (existing && existing.productLink) || ''
+      };
       // Directly-scraped Vendor/Category are authoritative — keep the brand memory fresh from them.
       if (r.vendor || r.category) {
         state.vendorMap[brandKey(r.brand)] = { brand: r.brand, vendor: r.vendor, category: r.category };
@@ -661,8 +674,8 @@
     });
   }
 
-  var FIELD_LABELS = { id: 'ID', brand: 'Brand', vendor: 'Vendor', category: 'Category', skus: 'No. of SKUs' };
-  var OPTIONAL_FIELDS = { vendor: true, category: true, skus: true };
+  var FIELD_LABELS = { id: 'ID', brand: 'Brand', vendor: 'Vendor', category: 'Category', skus: 'No. of SKUs', productLink: 'Product Link' };
+  var OPTIONAL_FIELDS = { vendor: true, category: true, skus: true, productLink: true };
 
   function renderSetup() {
     stopPicking();
@@ -670,7 +683,7 @@
 
     var info = document.createElement('div');
     info.style.marginBottom = '8px';
-    info.innerHTML = 'Click a button below, then click the matching value <u>on the page</u> (in the first row). Press Esc to cancel. ID and Brand are required — the first time you pick one of them, you\'ll be asked to pick the other too so the row pattern can be worked out; after that every field just needs one click. Vendor and Category are optional — leave unset if this page doesn\'t show them, and you\'ll be asked for them once per brand instead. No. of SKUs is optional too — leave it unset to keep filling that in by hand, or pick it (e.g. the number in "Pending Variants (3)") to add it as a 5th column automatically.';
+    info.innerHTML = 'Click a button below, then click the matching value <u>on the page</u> (in the first row). Press Esc to cancel. ID and Brand are required — the first time you pick one of them, you\'ll be asked to pick the other too so the row pattern can be worked out; after that every field just needs one click. Vendor and Category are optional — leave unset if this page doesn\'t show them, and you\'ll be asked for them once per brand instead. No. of SKUs is optional too — leave it unset to keep filling that in by hand, or pick it (e.g. the number in "Pending Variants (3)") to add it as a 5th column automatically. Product Link is optional and never appears in the pasted text — pick it (the product\'s title/link) only if you plan to use the separate Category Enricher userscript, which needs it to visit each product\'s detail page.';
     body.appendChild(info);
 
     var rowRawCount = rawRows().length;
@@ -725,7 +738,9 @@
       row.appendChild(button('🎯 Pick ' + FIELD_LABELS[field] + ' value', function () {
         body.innerHTML = '';
         var msg = document.createElement('div');
-        msg.textContent = 'Now click the ' + FIELD_LABELS[field] + ' value in the FIRST row of the list (Esc to cancel)...';
+        msg.textContent = field === 'productLink'
+          ? 'Now click the product\'s title/link (whatever opens its detail page) in the FIRST row of the list (Esc to cancel)...'
+          : 'Now click the ' + FIELD_LABELS[field] + ' value in the FIRST row of the list (Esc to cancel)...';
         body.appendChild(msg);
         startPicking(field, function (el) {
           var result = handleFieldPick(field, el);
@@ -800,7 +815,7 @@
       var parsed = parseCurrentPage();
       if (!parsed.configured) { alert('Set up ID and Brand fields first.'); return; }
       var lines = parsed.rows.slice(0, 6).map(function (r) {
-        return 'ID=' + r.id + ' | Brand=' + r.brand + ' | Vendor=' + (r.vendor || '(none)') + ' | Category=' + (r.category || '(none)') + ' | SKUs=' + (r.skus || '(none)');
+        return 'ID=' + r.id + ' | Brand=' + r.brand + ' | Vendor=' + (r.vendor || '(none)') + ' | Category=' + (r.category || '(none)') + ' | SKUs=' + (r.skus || '(none)') + ' | Link=' + (r.productLink || '(none)');
       });
       var mismatch = FIELDS.filter(function (f) { return state.cfg[f + 'Path'] && parsed.counts[f] < parsed.totalRows; });
       var extra = mismatch.length

@@ -63,6 +63,11 @@ do this once — it keeps working after this.
      Category then fall back to asking you once per brand at the end (see
      step 5); No. of SKUs simply stays out of the pasted block if left
      unset. Press `Esc` any time to cancel a pick.
+   - There's also **Product Link** (optional, click the product's title).
+     It never appears in the pasted text — it's only needed if you also
+     use the separate **Category Enricher** userscript below, which visits
+     each product's own page to read a more accurate Category than the
+     list view shows.
    - There's also a **🎯 Pick Next button** option at the bottom (optional)
      — see **Auto-collect all pages** below for what it unlocks.
    - Click **👁 Preview parsed rows** to confirm it read the first few rows
@@ -165,6 +170,62 @@ Each field's own status line shows "N of M row(s) have a value" — if a
 field is consistently missing on some rows (not just occasionally, e.g.
 for out-of-stock items), it likely needs re-picking.
 
+## Category Enricher (optional add-on)
+
+If the Category shown on the list page isn't the real/full one (e.g. the
+list shows a short tag but the product's own page shows the full
+breadcrumb like "Toys > Dolls & Accessories > Baby Dolls & Prams > Baby
+Dolls"), `category-enricher.user.js` visits every collected product's own
+page and overwrites its Category with the real value — fully
+automatically, one product after another.
+
+This can't be a bookmarklet: opening a product here is a full page
+reload, which wipes out any running bookmarklet script. Instead it's a
+**userscript** — a small script that a browser extension re-runs
+automatically on every page load — so it can survive the reload and keep
+going by itself.
+
+### Install (one-time)
+
+1. Install the **Tampermonkey** browser extension (search your browser's
+   extension store for "Tampermonkey" — it's free, and one of the most
+   widely used browser extensions for this).
+2. Open Tampermonkey's dashboard → **Create a new script** (or **Utilities
+   → Import from file**) and paste in the entire contents of
+   [`category-enricher.user.js`](./category-enricher.user.js), then save
+   (`Ctrl+S`).
+3. Check the `@match` line near the top of the script matches the
+   internal tool's actual URL — it's set to
+   `https://sellerportal.mumzworld.com/*`; edit that line in Tampermonkey
+   if your URL is different.
+
+### Use it
+
+1. First, use the ID Tracker bookmarklet as normal, making sure you also
+   pick **Product Link** in Setup fields, and collect all the pages you
+   want (manually or with Auto-collect).
+2. Open any **one product's own page** (click its title). A small
+   **Category Enricher** panel appears bottom-left.
+3. Click **🎯 Pick Category field**, then click the real Category value on
+   that page (the breadcrumb, like in the screenshot above). This is a
+   one-time calibration — it's remembered after this.
+4. Go back to the list page. The panel now shows **▶ Start enrichment
+   (N)** — click it. From here it runs itself: opens the first product,
+   reads its Category, shows a 1.5-second "next in..." pause (with a
+   **⏹ Stop here** button if you want to break in), then moves to the
+   next product, and so on, until every product is done — then it
+   navigates back to the list and shows a summary.
+5. Re-run the ID Tracker bookmarklet's **📋 Finish & copy for Sheet** as
+   usual — the enriched Categories are already saved into the same
+   collected data, so the copied block now has the corrected values.
+
+Nothing is lost if you close the tab mid-run — whatever was already
+updated stays saved. If you reopen the site later while a run was still
+in progress, it recognizes the interruption (rather than silently reading
+the wrong page) and shows **▶ Resume** (jumps back to the product it was
+on) or **Discard** (clears the run; already-updated products keep their
+enriched Category either way).
+
 ## Notes / limitations
 
 - This only works on the internal tool's own pages (it's a script that
@@ -177,8 +238,11 @@ for out-of-stock items), it likely needs re-picking.
 
 ## Files
 
-- `collector.js` — the readable source code.
+- `collector.js` — the readable source code for the main bookmarklet.
 - `build.js` — regenerates `bookmarklet.txt` from `collector.js`
   (`node build.js`). Only needed if you edit `collector.js`.
 - `bookmarklet.txt` — the generated `javascript:` URL to paste as your
   bookmark's URL.
+- `category-enricher.user.js` — the optional Tampermonkey userscript
+  described above. Install its contents directly in Tampermonkey; there's
+  no build step for this one.
