@@ -6,7 +6,7 @@ raw video anywhere. First run downloads the chosen model from Hugging Face
 """
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Callable, List, Optional
 
 from config import (
     WHISPER_BEAM_SIZE,
@@ -60,9 +60,16 @@ def transcribe(video_path: str, progress_cb: Optional[Callable[[str], None]] = N
 
 
 def to_srt(transcript: Transcript) -> str:
-    """Segment-level SRT, mainly useful as a human-readable transcript export."""
+    """Segment-level SRT (Hindi, the original transcript), mainly useful as a
+    human-readable transcript export."""
+    return segments_to_srt(transcript.segments)
+
+
+def segments_to_srt(segments: List[TranscriptSegment]) -> str:
+    """SRT from any list of segments - reused for both the original Hindi
+    transcript and the translated English one (Transcript.segments_en)."""
     lines = []
-    for i, seg in enumerate(transcript.segments, start=1):
+    for i, seg in enumerate(segments, start=1):
         lines.append(str(i))
         lines.append(f"{_srt_ts(seg.start)} --> {_srt_ts(seg.end)}")
         lines.append(seg.text)

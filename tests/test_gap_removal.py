@@ -20,7 +20,7 @@ from services.clipper import (  # noqa: E402
     build_time_remap,
     compute_keep_segments,
     merge_and_pad_cut_ranges,
-    render_clip_for_platform,
+    render_clip_for_angle,
 )
 
 TEST_VIDEO = os.environ.get("SATSANG_TEST_VIDEO", "/tmp/test_session.mp4")
@@ -101,14 +101,14 @@ def test_gap_removal_shortens_the_rendered_clip(tmp_path):
     clip = Clip(start_seconds=0.0, end_seconds=11.0, title="t")
 
     out_dir = tmp_path / "clips"
-    out_path = render_clip_for_platform(
-        Path(TEST_VIDEO), clip, "youtube", words, out_dir, remove_silence=True
+    out_path = render_clip_for_angle(
+        Path(TEST_VIDEO), clip, "primary", words, out_dir, remove_silence=True
     )
     duration_with_removal = _probe_duration(out_path)
 
     out_dir2 = tmp_path / "clips_no_removal"
-    out_path2 = render_clip_for_platform(
-        Path(TEST_VIDEO), clip, "youtube", words, out_dir2, remove_silence=False
+    out_path2 = render_clip_for_angle(
+        Path(TEST_VIDEO), clip, "primary", words, out_dir2, remove_silence=False
     )
     duration_without_removal = _probe_duration(out_path2)
 
@@ -125,12 +125,12 @@ def test_extra_cut_ranges_shortens_the_rendered_clip(tmp_path):
     words = _words((0.0, 1.0), (1.0, 2.0), (2.0, 3.0), (5.0, 6.0), (6.0, 7.0))
     clip = Clip(start_seconds=0.0, end_seconds=7.0, title="t")
 
-    out_path = render_clip_for_platform(
-        Path(TEST_VIDEO), clip, "youtube", words, tmp_path / "with_cut",
+    out_path = render_clip_for_angle(
+        Path(TEST_VIDEO), clip, "primary", words, tmp_path / "with_cut",
         remove_silence=False, extra_cut_ranges=[(3.0, 5.0)],
     )
-    out_path2 = render_clip_for_platform(
-        Path(TEST_VIDEO), clip, "youtube", words, tmp_path / "without_cut",
+    out_path2 = render_clip_for_angle(
+        Path(TEST_VIDEO), clip, "primary", words, tmp_path / "without_cut",
         remove_silence=False,
     )
 
@@ -151,8 +151,8 @@ def test_a_cut_word_never_survives_in_the_burned_captions(tmp_path):
     ]
     clip = Clip(start_seconds=0.0, end_seconds=3.0, title="t")
 
-    render_clip_for_platform(
-        Path(TEST_VIDEO), clip, "instagram_reel", words, tmp_path,
+    render_clip_for_angle(
+        Path(TEST_VIDEO), clip, "primary", words, tmp_path,
         remove_silence=False, extra_cut_ranges=[(0.5, 1.1)],
     )
     srt_text = next(tmp_path.glob("*.srt")).read_text(encoding="utf-8")

@@ -37,6 +37,7 @@ _CLIP_SUGGESTIONS_SCHEMA = {
                     "twitter_text_hi": {"type": "string"},
                     "twitter_text_en": {"type": "string"},
                     "hashtags": {"type": "array", "items": {"type": "string"}},
+                    "tags": {"type": "array", "items": {"type": "string"}},
                 },
                 "required": [
                     "start_seconds",
@@ -53,6 +54,7 @@ _CLIP_SUGGESTIONS_SCHEMA = {
                     "twitter_text_hi",
                     "twitter_text_en",
                     "hashtags",
+                    "tags",
                 ],
                 "additionalProperties": False,
             },
@@ -67,12 +69,19 @@ You help a spiritual teaching group turn a long recorded session into short soci
 media clips. The talk itself is mostly in Hindi (with occasional English words),
 and you will be given a timestamped transcript of a ~2 hour session in that mix.
 
-Find 8-15 moments that work as standalone clips of roughly 45-120 seconds each:
+Find EVERY moment in the session that works as a standalone clip of roughly
+45-120 seconds - don't artificially cap yourself at a small handful. A full
+~2 hour session commonly contains 20-40+ such moments (stories, parables,
+question-and-answer exchanges, distinct teaching points); a sparser session
+may have fewer. Prioritize completeness over being overly selective - if in
+doubt about whether a moment stands alone well enough, include it rather
+than skip it.
 - Each clip must be a complete thought, story, or teaching point - never start or
   end mid-sentence, and never require context from outside the clip to make sense.
 - Prefer moments with a strong opening line in the first few seconds (a question,
   a surprising statement, a story hook) since that's what stops someone scrolling.
-- Spread clips across the whole session rather than clustering them in one part.
+- Spread clips across the whole session - don't stop early and leave the back
+  half unreviewed.
 - Do not overlap clips.
 - start_seconds and end_seconds must be real timestamps taken from the transcript
   you were given, not estimates. Double check that the text actually spoken
@@ -100,6 +109,13 @@ Keep every field concise - a short internal title, a one-line hook, a punchy
 YouTube title, a 1-2 sentence Instagram caption, a tweet under 200 characters,
 and 3-6 hashtags (hashtags in English/roman script, as is conventional even
 for Hindi-language posts). Do not pad any field with extra commentary.
+
+Also provide "tags": 2-5 short topical/thematic keywords in English (e.g.
+"surrender", "fear-of-death", "parable", "meditation-technique",
+"guru-disciple-relationship") describing what this moment is actually about.
+These are for internal organization (grouping related clips, cross-referencing
+when writing blog posts later) - not for social media, so no hashtag
+formatting and no overlap requirement with the hashtags field.
 """
 
 
@@ -118,13 +134,14 @@ def _mmss(seconds: float) -> str:
 
 def suggest_clips(transcript: Transcript) -> ClipSuggestions:
     transcript_text = format_transcript_for_prompt(transcript)
-    # A real ~2 hour transcript can prompt Claude toward the higher end of
-    # the requested clip count, each with several caption fields - give it
-    # real headroom (32000) so the JSON response doesn't get cut off mid-way.
+    # With the clip-count cap removed, a dense ~2 hour session can easily
+    # produce 20-40+ clips, each with several caption fields - raised from
+    # 32000 to give real headroom so the JSON response doesn't get cut off
+    # mid-way (the same failure mode hit earlier at lower budgets).
     return call_structured(
         system=SYSTEM_PROMPT,
         user_content=f"Timestamped transcript:\n\n{transcript_text}",
         schema=_CLIP_SUGGESTIONS_SCHEMA,
         result_model=ClipSuggestions,
-        max_tokens=32000,
+        max_tokens=64000,
     )

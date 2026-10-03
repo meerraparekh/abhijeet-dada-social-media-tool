@@ -11,12 +11,10 @@ from typing import Callable, List, Optional, Tuple
 
 from schemas import Clip, TranscriptWord
 
-# platform -> (output width, height, burn captions by default)
-PRESETS = {
-    "youtube": {"width": 1920, "height": 1080, "vertical": False, "burn_captions": False},
-    "instagram_reel": {"width": 1080, "height": 1920, "vertical": True, "burn_captions": True},
-    "twitter": {"width": 1280, "height": 720, "vertical": False, "burn_captions": True},
-}
+# Single output format for every clip - vertical 9:16 with burned-in
+# captions, used everywhere (YouTube Shorts, Instagram Reels/Stories).
+OUTPUT_WIDTH = 1080
+OUTPUT_HEIGHT = 1920
 
 # Silence/gap removal defaults. A gap between spoken words shorter than
 # MAX_GAP_SECONDS is left alone (natural pauses in speech); anything longer
@@ -215,12 +213,12 @@ def _srt_ts(seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
-def _post_filters(preset: dict, srt_name: Optional[str]) -> List[str]:
-    filters = []
-    if preset["vertical"]:
-        filters.append("crop=ih*9/16:ih")
-    filters.append(f"scale={preset['width']}:{preset['height']}:force_original_aspect_ratio=decrease")
-    filters.append(f"pad={preset['width']}:{preset['height']}:(ow-iw)/2:(oh-ih)/2:color=black")
+def _post_filters(srt_name: Optional[str]) -> List[str]:
+    filters = [
+        "crop=ih*9/16:ih",
+        f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=decrease",
+        f"pad={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black",
+    ]
     if srt_name:
         filters.append(
             f"subtitles={srt_name}:force_style='FontName=Arial,FontSize=20,"
@@ -229,29 +227,70 @@ def _post_filters(preset: dict, srt_name: Optional[str]) -> List[str]:
     return filters
 
 
-def render_clip_for_platform(
+def _shift_and_clamp_segments(
+    keep_segments: List[Tuple[float, float]], offset: float, duration: Optional[float]
+) -> Tuple[List[Tuple[float, float]], List[Tuple[float, float]]]:
+    """Translate primary-timeline keep_segments into one angle's own file
+    timeline by `offset`, clamping against that angle's known `duration` (for
+    an angle whose recording stopped before the others). Returns a pair:
+    (angle_segments - what to actually cut from this angle's file,
+    effective_primary_segments - the same segments translated back to the
+    primary timeline, same length/order, for caption generation to stay in
+    sync with whatever actually made it into this angle's render). If the
+    clip extends beyond what this angle has, later segments are dropped or
+    truncated - never fabricated."""
+    angle_segments: List[Tuple[float, float]] = []
+    effective_primary: List[Tuple[float, float]] = []
+    for s, e in keep_segments:
+        a_s, a_e = s + offset, e + offset
+        if duration is not None:
+            if a_s >= duration:
+                break  # this and everything after is beyond this angle's footage
+            a_e = min(a_e, duration)
+        if a_e > a_s:
+            angle_segments.append((a_s, a_e))
+            effective_primary.append((a_s - offset, a_e - offset))
+    return angle_segments, effective_primary
+
+
+class ClipNotAvailable(Exception):
+    """Raised when a clip's time range isn't available in a given angle's
+    footage at all - e.g. the angle's recording stopped before the clip
+    even starts."""
+
+
+def render_clip_for_angle(
     raw_video_path: Path,
     clip: Clip,
-    platform: str,
+    angle_id: str,
     words: List[TranscriptWord],
     out_dir: Path,
+    offset_seconds: float = 0.0,
+    angle_duration: Optional[float] = None,
     remove_silence: bool = True,
     max_gap_seconds: float = DEFAULT_MAX_GAP_SECONDS,
     caption_words: Optional[List[TranscriptWord]] = None,
     extra_cut_ranges: Optional[List[Tuple[float, float]]] = None,
 ) -> Path:
-    """`words` (the original-language, real per-word timing from Whisper) is
-    used to decide where the silence gaps are - that's the accurate source
-    for what's actually silence. `caption_words` (defaults to `words` if not
-    given) is what actually gets burned in as on-screen text - pass the
-    English translation's interpolated word timing here to caption in
-    English while still cutting gaps based on the real Hindi speech timing.
-    `extra_cut_ranges` are additional (start, end) spans to cut regardless of
-    remove_silence - e.g. AI-flagged filler words/mistakes - combined with
-    the silence gaps into one set of cuts."""
-    preset = PRESETS[platform]
+    """Render one clip from one camera angle's own video file.
+
+    `clip`/`words`/`caption_words` timestamps are all on the PRIMARY angle's
+    timeline (the one that got transcribed); `offset_seconds` translates
+    into this angle's own file (primary_time + offset_seconds = this angle's
+    time - see services/sync.py). `angle_duration`, if known, clamps against
+    an angle whose recording stopped early rather than fabricating footage
+    that isn't there; raises ClipNotAvailable if the clip's range isn't
+    available in this angle at all.
+
+    `caption_words` (defaults to `words` if not given) is what actually gets
+    burned in as on-screen text - pass the English translation's interpolated
+    word timing here to caption in English while still cutting gaps based on
+    the real Hindi speech timing. `extra_cut_ranges` are additional
+    (start, end) spans to cut regardless of remove_silence - e.g. AI-flagged
+    filler words/mistakes - combined with the silence gaps into one set of
+    cuts."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{clip.id}_{platform}.mp4"
+    out_path = out_dir / f"{clip.id}_{angle_id}.mp4"
     caption_words = caption_words if caption_words is not None else words
 
     cut_ranges: List[Tuple[float, float]] = list(extra_cut_ranges or [])
@@ -263,13 +302,23 @@ def render_clip_for_platform(
         else [(clip.start_seconds, clip.end_seconds)]
     )
 
+    angle_segments, effective_keep_segments = _shift_and_clamp_segments(
+        keep_segments, offset_seconds, angle_duration
+    )
+    if not angle_segments:
+        raise ClipNotAvailable(
+            f"This clip isn't available in angle {angle_id!r} - its footage "
+            "doesn't reach that far (it likely stopped recording early)."
+        )
+
     srt_path = None
-    if preset["burn_captions"] and caption_words:
-        srt_path = out_dir / f"{clip.id}_{platform}.srt"
-        if len(keep_segments) > 1:
-            remap, _ = build_time_remap(keep_segments)
+    if caption_words:
+        srt_path = out_dir / f"{clip.id}_{angle_id}.srt"
+        if len(effective_keep_segments) > 1:
+            remap, _ = build_time_remap(effective_keep_segments)
             srt_text = _words_to_srt(
-                caption_words, clip.start_seconds, clip.end_seconds, remap=remap, keep_segments=keep_segments
+                caption_words, clip.start_seconds, clip.end_seconds,
+                remap=remap, keep_segments=effective_keep_segments,
             )
         else:
             srt_text = _words_to_srt(caption_words, clip.start_seconds, clip.end_seconds)
@@ -284,10 +333,10 @@ def render_clip_for_platform(
     # to trip over.
     srt_name = srt_path.name if srt_path else None
 
-    if len(keep_segments) == 1:
+    if len(angle_segments) == 1:
         # No gaps worth cutting - the simple single-segment path.
-        seg_start, seg_end = keep_segments[0]
-        vf = ",".join(_post_filters(preset, srt_name))
+        seg_start, seg_end = angle_segments[0]
+        vf = ",".join(_post_filters(srt_name))
         cmd = [
             "ffmpeg", "-y",
             "-i", str(raw_video_path),
@@ -303,12 +352,12 @@ def render_clip_for_platform(
         # ffmpeg pass, then apply crop/scale/pad/captions to the result.
         parts = []
         concat_refs = []
-        for i, (seg_start, seg_end) in enumerate(keep_segments):
+        for i, (seg_start, seg_end) in enumerate(angle_segments):
             parts.append(f"[0:v]trim=start={seg_start}:end={seg_end},setpts=PTS-STARTPTS[v{i}]")
             parts.append(f"[0:a]atrim=start={seg_start}:end={seg_end},asetpts=PTS-STARTPTS[a{i}]")
             concat_refs.append(f"[v{i}][a{i}]")
-        parts.append(f"{''.join(concat_refs)}concat=n={len(keep_segments)}:v=1:a=1[vcat][acat]")
-        parts.append(f"[vcat]{','.join(_post_filters(preset, srt_name))}[vout]")
+        parts.append(f"{''.join(concat_refs)}concat=n={len(angle_segments)}:v=1:a=1[vcat][acat]")
+        parts.append(f"[vcat]{','.join(_post_filters(srt_name))}[vout]")
         filter_complex = ";".join(parts)
 
         cmd = [

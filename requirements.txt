@@ -4,4 +4,7 @@ python-multipart==0.0.20
 faster-whisper==1.1.1
 requests>=2.31  # faster-whisper's model download uses this; not always pulled in transitively
 anthropic>=0.68.0
+numpy>=1.26
+scipy>=1.11  # FFT-based audio cross-correlation for multi-angle sync
+python-docx>=1.1.0  # Word document export (transcripts, blog posts)
 pydantic==2.10.4

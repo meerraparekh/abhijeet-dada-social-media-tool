@@ -35,6 +35,7 @@ def client(tmp_path, monkeypatch):
 
     import main as main_module
     from schemas import Transcript, TranscriptSegment, TranscriptWord, ClipSuggestion, ClipSuggestions
+    from services.blog_writer import BlogPostSuggestion, BlogPostSuggestions
 
     # --- fake the network-dependent steps ---
     def fake_transcribe(video_path, progress_cb=None):
@@ -77,6 +78,7 @@ def client(tmp_path, monkeypatch):
                     twitter_text_hi="स्थिरता की प्रकृति पर।",
                     twitter_text_en="On the nature of stillness.",
                     hashtags=["satsang", "meditation"],
+                    tags=["stillness", "meditation-technique"],
                 )
             ]
         )
@@ -84,9 +86,23 @@ def client(tmp_path, monkeypatch):
     def fake_translate_segments(transcript):
         return [f"[EN] {seg.text}" for seg in transcript.segments]
 
+    def fake_generate_blog_posts(transcript):
+        return BlogPostSuggestions(
+            posts=[
+                BlogPostSuggestion(
+                    title="On Stillness",
+                    tags=["stillness"],
+                    body=transcript.segments[0].text + "\n\n" + transcript.segments[1].text,
+                    source_start_seconds=transcript.segments[0].start,
+                    source_end_seconds=transcript.segments[-1].end,
+                )
+            ]
+        )
+
     monkeypatch.setattr(main_module.transcribe, "transcribe", fake_transcribe)
     monkeypatch.setattr(main_module.clip_suggester, "suggest_clips", fake_suggest)
     monkeypatch.setattr(main_module.translator, "translate_segments", fake_translate_segments)
+    monkeypatch.setattr(main_module.blog_writer, "generate_blog_posts", fake_generate_blog_posts)
 
     from fastapi.testclient import TestClient
 
@@ -158,10 +174,11 @@ def test_full_pipeline(client):
     assert res.status_code == 200
     assert res.json()["assignee"] == "Priya"
 
-    # 6. render for all three platforms - this is real ffmpeg, not faked
+    # 6. render for the (only) primary angle - this is real ffmpeg, not faked
+    primary_angle_id = session["angles"][0]["id"]
     res = client.post(
         f"/api/sessions/{session_id}/clips/{clip['id']}/render",
-        json={"platforms": ["youtube", "instagram_reel", "twitter"]},
+        json={"angle_ids": [primary_angle_id]},
     )
     job = _wait_for_job(client, res.json()["job_id"], timeout=120)
     assert job["state"] == "done", job
@@ -169,42 +186,58 @@ def test_full_pipeline(client):
     session = client.get(f"/api/sessions/{session_id}").json()
     clip = session["clips"][0]
     assert clip["status"] == "done"
-    assert set(clip["rendered_files"].keys()) == {"youtube", "instagram_reel", "twitter"}
+    assert set(clip["rendered_files"].keys()) == {primary_angle_id}
 
     data_dir = Path(os.environ["SATSANG_DATA_DIR"])
-    expected_dims = {
-        "youtube": (1920, 1080),
-        "instagram_reel": (1080, 1920),
-        "twitter": (1280, 720),
-    }
-    for platform, rel_path in clip["rendered_files"].items():
-        out_path = data_dir / "sessions" / session_id / rel_path
-        assert out_path.exists() and out_path.stat().st_size > 0
+    out_path = data_dir / "sessions" / session_id / clip["rendered_files"][primary_angle_id]
+    assert out_path.exists() and out_path.stat().st_size > 0
 
-        probe = subprocess.run(
-            [
-                "ffprobe", "-v", "error", "-select_streams", "v:0",
-                "-show_entries", "stream=width,height",
-                "-of", "csv=p=0", str(out_path),
-            ],
-            stdout=subprocess.PIPE, text=True, check=True,
-        )
-        w, h = map(int, probe.stdout.strip().split(","))
-        assert (w, h) == expected_dims[platform], (platform, w, h)
+    # single output size everywhere now: vertical 9:16
+    probe = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-of", "csv=p=0", str(out_path),
+        ],
+        stdout=subprocess.PIPE, text=True, check=True,
+    )
+    w, h = map(int, probe.stdout.strip().split(","))
+    assert (w, h) == (1080, 1920), (w, h)
 
-        # captioned platforms should have burned in the English translation,
-        # not the original transcript text
-        srt_path = out_path.with_suffix(".srt")
-        if platform in ("instagram_reel", "twitter"):
-            assert srt_path.exists()
-            assert "[EN]" in srt_path.read_text(encoding="utf-8")
+    # captions are always burned in and should carry the English translation,
+    # not the original transcript text
+    srt_path = out_path.with_suffix(".srt")
+    assert srt_path.exists()
+    assert "[EN]" in srt_path.read_text(encoding="utf-8")
 
-        # download endpoint should serve the same file
-        res = client.get(f"/api/sessions/{session_id}/clips/{clip['id']}/download/{platform}")
-        assert res.status_code == 200
-        assert len(res.content) == out_path.stat().st_size
+    # download endpoint should serve the same file
+    res = client.get(f"/api/sessions/{session_id}/clips/{clip['id']}/download/{primary_angle_id}")
+    assert res.status_code == 200
+    assert len(res.content) == out_path.stat().st_size
 
-    # 7. delete the session cleans up
+    # 6b. full-session transcript exports
+    res = client.get(f"/api/sessions/{session_id}/transcript.srt")
+    assert res.status_code == 200 and len(res.text) > 0
+    res = client.get(f"/api/sessions/{session_id}/transcript_en.srt")
+    assert res.status_code == 200 and "[EN]" in res.text
+    res = client.get(f"/api/sessions/{session_id}/transcript.docx")
+    assert res.status_code == 200 and len(res.content) > 0
+    res = client.get(f"/api/sessions/{session_id}/transcript_en.docx")
+    assert res.status_code == 200 and len(res.content) > 0
+
+    # 7. blog post generation (faked Claude call, real docx export)
+    res = client.post(f"/api/sessions/{session_id}/generate-blog-posts")
+    job = _wait_for_job(client, res.json()["job_id"])
+    assert job["state"] == "done", job
+
+    session = client.get(f"/api/sessions/{session_id}").json()
+    assert len(session["blog_posts"]) == 1
+    assert session["blog_posts"][0]["title"] == "On Stillness"
+
+    res = client.get(f"/api/sessions/{session_id}/blog_posts.docx")
+    assert res.status_code == 200 and len(res.content) > 0
+
+    # 8. delete the session cleans up
     res = client.delete(f"/api/sessions/{session_id}")
     assert res.status_code == 200
     assert client.get(f"/api/sessions/{session_id}").status_code == 404

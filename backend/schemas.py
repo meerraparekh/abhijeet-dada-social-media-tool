@@ -7,11 +7,11 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-Platform = Literal["youtube", "instagram_reel", "twitter"]
 ClipStatus = Literal["suggested", "claimed", "rendering", "done"]
 SessionStatus = Literal[
     "uploaded", "transcribing", "transcribed", "suggesting", "ready", "error"
 ]
+SyncStatus = Literal["primary", "pending", "synced", "failed"]
 
 
 def new_id() -> str:
@@ -39,6 +39,7 @@ class ClipSuggestion(BaseModel):
     twitter_text_hi: str = Field(description="A ready-to-post tweet/X post text in Hindi, under 280 characters")
     twitter_text_en: str = Field(description="English translation of twitter_text_hi, under 280 characters")
     hashtags: List[str] = Field(description="3-8 relevant hashtags, without the # symbol - conventionally in English/roman script for discoverability even on Hindi-language posts")
+    tags: List[str] = Field(description="2-5 short topical/thematic keywords in English describing what this moment is actually about, for internal organization and later use in blog posts - not social media hashtags")
 
 
 class ClipSuggestions(BaseModel):
@@ -67,6 +68,12 @@ class Transcript(BaseModel):
     # timing) - used for burned-in captions aimed at an English-speaking
     # audience. Empty until the "Translate captions" step has been run.
     caption_words_en: List[TranscriptWord] = Field(default_factory=list)
+    # English translation, one per segment (same start/end as `segments`,
+    # same order) - a readable sentence-level transcript for the English
+    # SRT/Word-doc exports, as opposed to caption_words_en's word-level
+    # interpolation used only for burning video captions. Empty until
+    # "Translate captions" has been run.
+    segments_en: List[TranscriptSegment] = Field(default_factory=list)
 
 
 class Clip(BaseModel):
@@ -85,20 +92,56 @@ class Clip(BaseModel):
     twitter_text_hi: str = ""
     twitter_text_en: str = ""
     hashtags: List[str] = Field(default_factory=list)
+    tags: List[str] = Field(default_factory=list)
     assignee: str = ""
     status: ClipStatus = "suggested"
-    rendered_files: dict = Field(default_factory=dict)  # platform -> relative file path
+    rendered_files: dict = Field(default_factory=dict)  # angle id -> relative file path
+
+
+class VideoAngle(BaseModel):
+    """One camera angle of the same recording. All timestamps elsewhere
+    (clips, transcript, hook) are expressed on the primary angle's own
+    timeline; every other angle carries an offset_seconds translating into
+    its own timeline - see services/sync.py."""
+    id: str = Field(default_factory=new_id)
+    label: str  # e.g. "1x" / "2x" / "4x", or whatever the uploader calls it
+    filename: str
+    is_primary: bool = False
+    offset_seconds: float = 0.0  # primary_time + offset_seconds = this angle's time
+    duration_seconds: Optional[float] = None  # None until probed
+    sync_status: SyncStatus = "pending"
+    sync_error: Optional[str] = None
+
+
+class BlogPost(BaseModel):
+    """A topic-based English blog post generated strictly from the actual
+    transcript content - not invented material (see services/blog_writer.py).
+    source_seconds are the real transcript range it was drawn from, kept for
+    traceability back to the recording."""
+    id: str = Field(default_factory=new_id)
+    title: str = ""
+    tags: List[str] = Field(default_factory=list)
+    body: str = ""
+    source_start_seconds: float = 0.0
+    source_end_seconds: float = 0.0
 
 
 class Session(BaseModel):
     id: str = Field(default_factory=new_id)
     name: str
     created_at: float = Field(default_factory=time.time)
-    video_filename: Optional[str] = None
+    angles: List[VideoAngle] = Field(default_factory=list)
     status: SessionStatus = "uploaded"
     error: Optional[str] = None
     transcript: Optional[Transcript] = None
     clips: List[Clip] = Field(default_factory=list)
+    blog_posts: List[BlogPost] = Field(default_factory=list)
+
+    def primary_angle(self) -> Optional["VideoAngle"]:
+        for a in self.angles:
+            if a.is_primary:
+                return a
+        return self.angles[0] if self.angles else None
 
 
 class JobStatus(BaseModel):

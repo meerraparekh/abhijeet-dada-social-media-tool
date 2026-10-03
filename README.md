@@ -1,9 +1,21 @@
 # Satsang Clips
 
-Turns a long recorded session (e.g. a weekly ~2 hour satsang) into short,
-ready-to-post clips for YouTube, Instagram Reels, and Twitter/X - with Claude
-finding the good moments for you, so nobody has to scrub through 2 hours of
-footage by hand.
+Turns a long recorded session (e.g. a weekly ~2 hour satsang) into
+ready-to-post vertical clips, full bilingual transcripts, and blog posts -
+with Claude finding the good moments and writing the derived content for
+you, so nobody has to scrub through 2 hours of footage by hand.
+
+- Handles up to three synchronized camera **angles** of the same recording
+  (e.g. 1x/2x/4x), auto-aligning them by audio even when they have different
+  start times or one stopped recording early.
+- Finds every story/parable/Q&A moment worth clipping, not just a handful -
+  a dense ~2 hour session commonly yields 20-40+ clips.
+- Every clip renders as one vertical 9:16 format, with burned-in English
+  captions, ready for YouTube Shorts, Reels, or Stories alike.
+- Full-session transcripts (Hindi original + English translation) export as
+  `.srt` and Word documents.
+- Blog posts: several shorter, topic-based English posts generated strictly
+  from what was actually said - nothing invented.
 
 **Cost:** $0/month in subscriptions. The only ongoing cost is a few cents of
 Claude API usage per session (see "What this costs" below) - everything else
@@ -20,20 +32,34 @@ identically on both platforms.
 
 ## How it works
 
-1. **Upload** the raw session video into the app.
+1. **Upload** the raw session video - this becomes the session's *primary
+   angle*, and every timestamp (transcript, clips) is anchored to its
+   timeline. Optionally **add more angles** (other cameras of the same
+   recording); each gets auto-synced against the primary by cross-correlating
+   their audio, so you don't need to manually figure out the time offset
+   between cameras that started at different moments.
 2. **Transcribe** - runs [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
-   locally (free, no upload of your footage anywhere) and produces a
-   timestamped transcript.
-3. **Suggest clips** - sends the transcript text (not the video) to the
-   Claude API, which proposes 10-20 self-contained 45-120 second clips, each
-   with a suggested YouTube title, Instagram caption, tweet text, and
-   hashtags.
-4. **Review & assign** - your team reviews the suggested clips in the
-   browser, tweaks in/out points (using the video player), edits captions,
-   and assigns clips to whoever's editing them.
-5. **Render** - per clip, per platform, using `ffmpeg`: cuts the segment,
-   crops to 9:16 for Reels, burns in captions, and produces a file ready to
-   upload.
+   locally on the primary angle (free, no upload of your footage anywhere)
+   and produces a timestamped transcript.
+3. **Translate captions** - asks Claude to translate the transcript to
+   English, used for burned-in captions aimed at a wider audience. Also
+   produces a readable, sentence-level English transcript export.
+4. **Suggest clips** - sends the transcript text (not the video) to the
+   Claude API, which finds every self-contained 45-120 second story/parable/
+   Q&A moment in the session (not capped to a small handful), each with a
+   suggested YouTube title, Instagram caption, tweet text, hashtags, and
+   internal topic tags (reused later for blog posts).
+5. **Review & assign** - your team reviews the suggested clips in the
+   browser, tweaks in/out points (using the video player, on any angle),
+   edits captions, and assigns clips to whoever's editing them.
+6. **Render** - per clip, per angle, using `ffmpeg`: cuts the segment (from
+   that angle's own footage, with the sync offset applied automatically),
+   crops to vertical 9:16, burns in English captions, and produces a file
+   ready to upload.
+7. **Generate blog posts** (optional) - asks Claude to restructure the
+   session's actual content into several shorter, topic-based English blog
+   posts - never adding material that wasn't actually said - exported as one
+   Word document.
 
 ## One-time setup
 
@@ -81,20 +107,23 @@ nothing to install.
 
 ## What this costs
 
-Transcription, silence removal, and video rendering are all free (local,
-open-source). Three things call the Claude API: suggesting clips (reads the
-transcript, picks moments), translating the transcript to English for
-burned-in captions (reads and rewrites essentially the whole transcript, so
-it costs more per session), and - only if you turn on "Remove filler words &
-mistakes" when rendering a clip - a small per-clip call to flag filler
-words/false starts:
+Transcription, audio sync, silence removal, and video rendering are all free
+(local, open-source). A few things call the Claude API: suggesting clips
+(reads the transcript, picks moments - now finding more of them, so this
+costs a bit more than before), translating the transcript to English for
+burned-in captions and the English transcript export (reads and rewrites
+essentially the whole transcript), generating blog posts (reads the whole
+transcript and writes several full posts, the largest single call), and -
+only if you turn on "Remove filler words & mistakes" when rendering a clip -
+a small per-clip call to flag filler words/false starts:
 
 | | Per session (~2 hrs) | 5 sessions/month |
 |---|---|---|
-| Suggest clips (Sonnet 5) | ≈ $0.10 | ≈ $0.50 |
+| Suggest clips (Sonnet 5) | ≈ $0.15 | ≈ $0.75 |
 | Translate captions (Sonnet 5) | ≈ $0.30 | ≈ $1.50 |
-| **Total (Sonnet 5, default)** | **≈ $0.40** | **≈ $2.00** |
-| Total on Claude Opus 5 (higher quality, costs more) | ≈ $1.00 | ≈ $5.00 |
+| Generate blog posts (Sonnet 5) | ≈ $0.35 | ≈ $1.75 |
+| **Total (Sonnet 5, default)** | **≈ $0.80** | **≈ $4.00** |
+| Total on Claude Opus 5 (higher quality, costs more) | ≈ $2.00 | ≈ $10.00 |
 | Remove filler words & mistakes, if used (per clip, not per session) | ≈ $0.01-0.02 | negligible even used on every clip |
 
 Change the model via `SATSANG_CLAUDE_MODEL` (defaults to `claude-sonnet-5`).
@@ -127,12 +156,13 @@ however you like.
 
 ```
 backend/       FastAPI app (main.py), session store, transcription/
-                clip-suggestion/rendering services
+                sync/clip-suggestion/rendering/blog-writing/docx-export
+                services
 frontend/       Plain HTML/CSS/JS UI served by the backend - no build step
 scripts/        Setup/run scripts for Mac and Windows, plus a synthetic
                 test-video generator (make_test_clip.sh) for smoke testing
                 without real footage
-tests/          Pipeline smoke test (pytest)
+tests/          Pipeline smoke test + unit tests (pytest)
 data/           Runtime storage (gitignored) - one folder per session
 ```
 
@@ -144,5 +174,11 @@ bash scripts/make_test_clip.sh /tmp/test_session.mp4   # needs espeak-ng
 SATSANG_TEST_VIDEO=/tmp/test_session.mp4 pytest tests/ -v
 ```
 
-The test fakes the Whisper and Claude network calls (so it runs offline) but
-exercises real `ffmpeg` cutting, vertical cropping, and caption burn-in.
+The pipeline test fakes the Whisper and Claude network calls (so it runs
+offline) but exercises real `ffmpeg` cutting, vertical cropping, and caption
+burn-in. `tests/test_sync.py` locks down the audio cross-correlation sign
+convention against synthetic signals with a known, constructed offset -
+important since a flipped sign there would silently cut the wrong footage
+for every non-primary angle. `tests/test_multi_angle.py` exercises offset
+application (and the "angle stopped recording early" clamp/reject paths)
+against real ffmpeg output.

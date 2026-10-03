@@ -1,4 +1,4 @@
-const state = { sessions: [], currentId: null, pollTimers: {} };
+const state = { sessions: [], currentId: null, previewAngleId: null };
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
@@ -30,6 +30,7 @@ function renderSidebar() {
 
 async function selectSession(id) {
   state.currentId = id;
+  state.previewAngleId = null;
   renderSidebar();
   await renderMain();
 }
@@ -41,6 +42,9 @@ async function renderMain() {
     return;
   }
   const session = await api(`/api/sessions/${state.currentId}`);
+  const primary = session.angles.find((a) => a.is_primary);
+  const previewAngleId = state.previewAngleId || (primary && primary.id);
+  const hasEnglish = session.transcript && session.transcript.segments_en && session.transcript.segments_en.length > 0;
 
   main.innerHTML = `
     <div class="action-row">
@@ -48,19 +52,38 @@ async function renderMain() {
       <span class="status-pill">${session.status}</span>
       <button class="secondary" id="deleteSessionBtn">Delete session</button>
     </div>
-    <video id="player" controls src="/api/sessions/${session.id}/video"></video>
-    <div class="action-row" style="margin-top:4px">
-      <span>Current time: <strong id="playerSeconds">0.0</strong>s (use this to fill in Start/End below)</span>
+    <div class="action-row">
+      <label style="margin:0">Preview angle:</label>
+      <select id="angleSelect">
+        ${session.angles.map((a) => `<option value="${a.id}" ${a.id === previewAngleId ? "selected" : ""}>${escapeHtml(a.label)}${a.is_primary ? " (primary)" : ""}</option>`).join("")}
+      </select>
     </div>
+    <video id="player" controls src="/api/sessions/${session.id}/video?angle_id=${previewAngleId}"></video>
+    <div class="action-row" style="margin-top:4px">
+      <span>Current time: <strong id="playerSeconds">0.0</strong>s (use this to fill in Start/End below - always on the primary angle's timeline)</span>
+    </div>
+
+    <div id="anglesSection"></div>
+
     <div class="action-row">
       <button id="transcribeBtn" ${session.transcript ? "disabled" : ""}>Transcribe</button>
       <button id="suggestBtn" ${!session.transcript || session.clips.length ? "disabled" : ""}>Suggest clips</button>
       <button id="translateBtn" ${!session.transcript ? "disabled" : ""}>
-        ${session.transcript && session.transcript.caption_words_en && session.transcript.caption_words_en.length ? "Re-translate captions" : "Translate captions (English)"}
+        ${hasEnglish ? "Re-translate captions" : "Translate captions (English)"}
       </button>
-      ${session.transcript ? `<a href="/api/sessions/${session.id}/transcript.srt">Download transcript (.srt)</a>` : ""}
+      <button id="blogBtn" ${!session.transcript ? "disabled" : ""}>
+        ${session.blog_posts.length ? "Re-generate blog posts" : "Generate blog posts"}
+      </button>
       <span id="jobNote" class="progress-note"></span>
     </div>
+    <div class="action-row">
+      ${session.transcript ? `<a href="/api/sessions/${session.id}/transcript.srt">Hindi transcript (.srt)</a>` : ""}
+      ${session.transcript ? `<a href="/api/sessions/${session.id}/transcript.docx">Hindi transcript (Word)</a>` : ""}
+      ${hasEnglish ? `<a href="/api/sessions/${session.id}/transcript_en.srt">English transcript (.srt)</a>` : ""}
+      ${hasEnglish ? `<a href="/api/sessions/${session.id}/transcript_en.docx">English transcript (Word)</a>` : ""}
+      ${session.blog_posts.length ? `<a href="/api/sessions/${session.id}/blog_posts.docx">Blog posts (Word, ${session.blog_posts.length})</a>` : ""}
+    </div>
+    ${session.blog_posts.length ? `<div class="blog-posts-box">${session.blog_posts.map((p) => `<div class="blog-post-row"><strong>${escapeHtml(p.title)}</strong> <span class="progress-note">${escapeHtml(p.tags.join(", "))}</span></div>`).join("")}</div>` : ""}
     <div id="clips"></div>
   `;
 
@@ -68,6 +91,11 @@ async function renderMain() {
   document.getElementById("transcribeBtn").onclick = () => runJob(`/api/sessions/${session.id}/transcribe`, "POST");
   document.getElementById("suggestBtn").onclick = () => runJob(`/api/sessions/${session.id}/suggest-clips`, "POST");
   document.getElementById("translateBtn").onclick = () => runJob(`/api/sessions/${session.id}/translate-captions`, "POST");
+  document.getElementById("blogBtn").onclick = () => runJob(`/api/sessions/${session.id}/generate-blog-posts`, "POST");
+  document.getElementById("angleSelect").onchange = (e) => {
+    state.previewAngleId = e.target.value;
+    document.getElementById("player").src = `/api/sessions/${session.id}/video?angle_id=${e.target.value}`;
+  };
 
   const player = document.getElementById("player");
   const secondsLabel = document.getElementById("playerSeconds");
@@ -75,6 +103,7 @@ async function renderMain() {
   player.addEventListener("timeupdate", updateSecondsLabel);
   player.addEventListener("seeking", updateSecondsLabel);
 
+  renderAngles(session);
   renderClips(session);
 }
 
@@ -84,6 +113,99 @@ async function deleteSession(id) {
   state.currentId = null;
   await loadSessions();
   await renderMain();
+}
+
+const SYNC_LABELS = {
+  primary: "primary",
+  pending: "syncing...",
+  synced: "synced",
+  failed: "sync failed",
+};
+
+function renderAngles(session) {
+  const el = document.getElementById("anglesSection");
+  const rows = session.angles
+    .map((a) => {
+      const badge = SYNC_LABELS[a.sync_status] || a.sync_status;
+      const extra = a.sync_status === "synced" ? ` (offset ${a.offset_seconds.toFixed(2)}s)` : "";
+      const retry = a.sync_status === "failed"
+        ? `<button class="secondary resync-btn" data-angle="${a.id}">Retry sync</button>`
+        : "";
+      const del = !a.is_primary
+        ? `<button class="secondary delete-angle-btn" data-angle="${a.id}">Remove</button>`
+        : "";
+      return `<div class="angle-row">
+        <strong>${escapeHtml(a.label)}</strong>
+        <span class="status-pill">${badge}${extra}</span>
+        ${a.sync_error ? `<span class="error-note">${escapeHtml(a.sync_error)}</span>` : ""}
+        ${retry} ${del}
+      </div>`;
+    })
+    .join("");
+
+  el.innerHTML = `
+    <div class="angles-box">
+      <label style="font-size:12px;color:var(--muted)">Camera angles</label>
+      ${rows}
+      <form id="addAngleForm" class="angle-add-form">
+        <input type="text" id="angleLabel" placeholder="label, e.g. 2x" required style="width:120px" />
+        <input type="file" id="angleFile" accept="video/*" required />
+        <button type="submit" class="secondary">Add angle</button>
+        <span id="angleUploadNote" class="progress-note"></span>
+      </form>
+    </div>
+  `;
+
+  el.querySelectorAll(".resync-btn").forEach((btn) => {
+    btn.onclick = async () => {
+      await api(`/api/sessions/${session.id}/angles/${btn.dataset.angle}/resync`, { method: "POST" });
+      pollUntilAnglesSettled(session.id);
+    };
+  });
+  el.querySelectorAll(".delete-angle-btn").forEach((btn) => {
+    btn.onclick = async () => {
+      if (!confirm("Remove this angle? Any clips already rendered from it stay on disk.")) return;
+      await api(`/api/sessions/${session.id}/angles/${btn.dataset.angle}`, { method: "DELETE" });
+      renderMain();
+    };
+  });
+
+  document.getElementById("addAngleForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const label = document.getElementById("angleLabel").value;
+    const file = document.getElementById("angleFile").files[0];
+    const note = document.getElementById("angleUploadNote");
+    note.textContent = "Uploading...";
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      await api(`/api/sessions/${session.id}/angles?${new URLSearchParams({ label })}`, { method: "POST", body: form });
+      note.textContent = "Uploaded, syncing...";
+      pollUntilAnglesSettled(session.id);
+    } catch (err) {
+      note.innerHTML = `<span class="error-note">${escapeHtml(err.message)}</span>`;
+    }
+  });
+}
+
+function pollUntilAnglesSettled(sessionId) {
+  const tick = async () => {
+    const session = await api(`/api/sessions/${sessionId}`);
+    if (state.currentId !== sessionId) return;
+    const stillPending = session.angles.some((a) => a.sync_status === "pending");
+    if (stillPending) {
+      // Partial refresh while waiting, so the angle-add form isn't blown away
+      // mid-upload by a full re-render.
+      renderAngles(session);
+      renderClips(session);
+      setTimeout(tick, 2000);
+    } else {
+      // Once settled, do a full re-render so the preview angle dropdown
+      // (built in renderMain, not renderAngles) picks up the new angle too.
+      renderMain();
+    }
+  };
+  tick();
 }
 
 function renderClips(session) {
@@ -104,15 +226,20 @@ function renderClipCard(session, clip) {
   const card = document.createElement("div");
   card.className = "clip-card";
 
-  const platformLabels = { youtube: "YouTube", instagram_reel: "Instagram Reel", twitter: "Twitter/X" };
-  const platformCheckboxes = Object.keys(platformLabels)
-    .map(
-      (p) => `<label><input type="checkbox" class="platform-cb" value="${p}" ${clip.rendered_files[p] ? "checked" : ""}/> ${platformLabels[p]}${clip.rendered_files[p] ? " <span class='progress-note'>(rendered - re-check to redo)</span>" : ""}</label>`
-    )
+  const angleCheckboxes = session.angles
+    .map((a) => {
+      const canRender = a.sync_status === "primary" || a.sync_status === "synced";
+      const rendered = clip.rendered_files[a.id];
+      const note = !canRender ? ` <span class="progress-note">(${SYNC_LABELS[a.sync_status]})</span>` : rendered ? " <span class='progress-note'>(rendered - re-check to redo)</span>" : "";
+      return `<label><input type="checkbox" class="angle-cb" value="${a.id}" ${rendered ? "checked" : ""} ${canRender ? "" : "disabled"}/> ${escapeHtml(a.label)}${note}</label>`;
+    })
     .join("");
 
   const downloads = Object.entries(clip.rendered_files)
-    .map(([p, path]) => `<a href="/api/sessions/${session.id}/clips/${clip.id}/download/${p}" download>${platformLabels[p] || p}</a>`)
+    .map(([angleId, path]) => {
+      const angle = session.angles.find((a) => a.id === angleId);
+      return `<a href="/api/sessions/${session.id}/clips/${clip.id}/download/${angleId}" download>${escapeHtml(angle ? angle.label : angleId)}</a>`;
+    })
     .join("");
 
   card.innerHTML = `
@@ -165,9 +292,10 @@ function renderClipCard(session, clip) {
     </div>
     <div class="row">
       <div><label>Hashtags</label><input type="text" class="f-hashtags" value="${escapeAttr(clip.hashtags.join(", "))}" /></div>
+      <div><label>Tags (for blog posts)</label><input type="text" class="f-tags" value="${escapeAttr(clip.tags.join(", "))}" /></div>
     </div>
     <div class="row" style="align-items:center">
-      <div class="platform-row">${platformCheckboxes}</div>
+      <div class="platform-row">${angleCheckboxes}</div>
       <label><input type="checkbox" class="remove-silence-cb" checked /> Remove silence/gaps</label>
       <label><input type="checkbox" class="remove-fillers-cb" /> Remove filler words &amp; mistakes (AI, small extra cost)</label>
       <button class="render-btn">Render selected</button>
@@ -198,6 +326,8 @@ function renderClipCard(session, clip) {
   card.querySelector(".f-tw-text-en").onchange = (e) => save({ twitter_text_en: e.target.value });
   card.querySelector(".f-hashtags").onchange = (e) =>
     save({ hashtags: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) });
+  card.querySelector(".f-tags").onchange = (e) =>
+    save({ tags: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) });
 
   const TIME_TARGETS = {
     start: { selector: ".f-start", field: "start_seconds" },
@@ -215,8 +345,8 @@ function renderClipCard(session, clip) {
   });
 
   card.querySelector(".render-btn").onclick = async () => {
-    const platforms = [...card.querySelectorAll(".platform-cb:checked")].map((c) => c.value);
-    if (!platforms.length) { alert("Pick at least one platform"); return; }
+    const angleIds = [...card.querySelectorAll(".angle-cb:checked")].map((c) => c.value);
+    if (!angleIds.length) { alert("Pick at least one angle"); return; }
     const removeSilence = card.querySelector(".remove-silence-cb").checked;
     const removeFillers = card.querySelector(".remove-fillers-cb").checked;
     const note = card.querySelector(".render-note");
@@ -224,10 +354,10 @@ function renderClipCard(session, clip) {
     const { job_id } = await api(`/api/sessions/${session.id}/clips/${clip.id}/render`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ platforms, remove_silence: removeSilence, remove_fillers: removeFillers }),
+      body: JSON.stringify({ angle_ids: angleIds, remove_silence: removeSilence, remove_fillers: removeFillers }),
     });
     pollJob(job_id, (job) => {
-      note.textContent = job.state === "running" ? job.progress || "rendering..." : "";
+      note.textContent = job.state === "running" ? job.progress || "rendering..." : job.progress || "";
       if (job.state === "done") renderMain();
       if (job.state === "error") note.innerHTML = `<span class="error-note">${escapeHtml(job.error)}</span>`;
     });
