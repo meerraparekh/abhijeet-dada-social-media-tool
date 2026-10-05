@@ -28,6 +28,7 @@ from services import (
     sync,
     transcribe,
     translator,
+    video_concat,
 )
 
 app = FastAPI(title="Satsang Clips")
@@ -52,6 +53,75 @@ def _get_angle_or_404(session: Session, angle_id: str) -> VideoAngle:
     return angle
 
 
+async def _save_upload_parts(session_id: str, prefix: str, files: List[UploadFile]) -> List[Path]:
+    """Streams each uploaded file to its own part file on disk (so a split
+    recording's pieces can be joined afterwards) and returns their paths, in
+    the same order the files were given."""
+    paths = []
+    for i, f in enumerate(files):
+        dest = store.session_dir(session_id) / f"{prefix}_part{i}.mp4"
+        with open(dest, "wb") as out:
+            while chunk := await f.read(1024 * 1024):
+                out.write(chunk)
+        paths.append(dest)
+    return paths
+
+
+def _concat_probe_and_sync(
+    session_id: str,
+    angle_id: str,
+    part_paths: List[Path],
+    final_path: Path,
+    progress_cb,
+    sync_against_primary: bool,
+) -> None:
+    """Join `part_paths` (one or more - several if this angle's recording
+    was split across files) into `final_path`, probe its duration, and - for
+    a non-primary angle - sync it against the primary angle's audio. Used
+    both for a brand new angle and for appending more footage to an
+    existing one."""
+    s = store.load(session_id)
+    a = next(x for x in s.angles if x.id == angle_id)
+
+    try:
+        if len(part_paths) > 1:
+            progress_cb(f"joining {len(part_paths)} video parts for angle {a.label!r}")
+        video_concat.concat_videos(part_paths, final_path)
+    except video_concat.ConcatFailed as exc:
+        a.sync_status = "failed"
+        a.sync_error = str(exc)
+        store.save(s)
+        return
+
+    a.filename = final_path.name
+    try:
+        a.duration_seconds = sync.probe_duration_seconds(final_path)
+    except sync.SyncFailed as exc:
+        a.sync_status = "failed"
+        a.sync_error = str(exc)
+        store.save(s)
+        return
+
+    if not sync_against_primary:
+        a.sync_status = "primary"
+        a.sync_error = None
+        store.save(s)
+        return
+
+    progress_cb(f"syncing angle {a.label!r} against the primary angle")
+    p = s.primary_angle()
+    try:
+        a.offset_seconds = sync.estimate_offset_seconds(
+            store.session_dir(session_id) / p.filename, final_path
+        )
+        a.sync_status = "synced"
+        a.sync_error = None
+    except sync.SyncFailed as exc:
+        a.sync_status = "failed"
+        a.sync_error = str(exc)
+    store.save(s)
+
+
 # ---------- sessions ----------
 
 @app.get("/api/sessions")
@@ -60,17 +130,27 @@ def list_sessions() -> List[Session]:
 
 
 @app.post("/api/sessions")
-async def create_session(name: str, file: UploadFile, label: str = "1x") -> Session:
+async def create_session(name: str, files: List[UploadFile], label: str = "1x") -> Session:
     """Creates a session with its first (primary) camera angle. Every clip
     timestamp and the transcript itself are anchored to this angle's own
     timeline - additional angles are added afterwards via
-    /api/sessions/{id}/angles and synced against this one."""
+    /api/sessions/{id}/angles and synced against this one.
+
+    Accepts more than one file in case the primary recording itself was
+    split (e.g. the camera stopped and was restarted) - parts are joined
+    into one continuous file, in the order given."""
+    if not files:
+        raise HTTPException(400, "select at least one video file")
     session = Session(name=name)
     store.create(session)
     dest = store.session_dir(session.id) / RAW_VIDEO_NAME
-    with open(dest, "wb") as f:
-        while chunk := await file.read(1024 * 1024):
-            f.write(chunk)
+
+    part_paths = await _save_upload_parts(session.id, "primary", files)
+    try:
+        video_concat.concat_videos(part_paths, dest)
+    except video_concat.ConcatFailed as exc:
+        store.delete(session.id)
+        raise HTTPException(400, f"Could not process the uploaded video(s): {exc}")
 
     duration = None
     try:
@@ -115,51 +195,69 @@ def get_video(session_id: str, angle_id: Optional[str] = None):
 # ---------- multi-angle upload + sync ----------
 
 @app.post("/api/sessions/{session_id}/angles")
-async def add_angle(session_id: str, file: UploadFile, label: str = "angle") -> VideoAngle:
+async def add_angle(session_id: str, files: List[UploadFile], label: str = "angle") -> VideoAngle:
     """Upload an additional camera angle of the same recording and kick off
     audio-based sync against the primary angle in the background. Angles
     commonly have different start times (and may stop recording early) -
-    sync_status tracks whether that offset has been resolved yet."""
+    sync_status tracks whether that offset has been resolved yet.
+
+    Accepts more than one file in case this angle's own recording was split
+    (e.g. its camera stopped and was restarted) - parts are joined into one
+    continuous file, in the order given, before syncing."""
     session = _get_session_or_404(session_id)
     primary = session.primary_angle()
     if not primary:
         raise HTTPException(400, "session has no primary video yet")
+    if not files:
+        raise HTTPException(400, "select at least one video file")
 
     angle = VideoAngle(label=label, filename="", sync_status="pending")
-    dest_name = f"angle_{angle.id}.mp4"
-    dest = store.session_dir(session_id) / dest_name
-    with open(dest, "wb") as f:
-        while chunk := await file.read(1024 * 1024):
-            f.write(chunk)
-    angle.filename = dest_name
-
-    try:
-        angle.duration_seconds = sync.probe_duration_seconds(dest)
-    except sync.SyncFailed as exc:
-        angle.sync_status = "failed"
-        angle.sync_error = str(exc)
+    part_paths = await _save_upload_parts(session_id, f"angle_{angle.id}", files)
+    final_path = store.session_dir(session_id) / f"angle_{angle.id}.mp4"
 
     session.angles.append(angle)
     store.save(session)
 
     def work(progress_cb):
-        progress_cb(f"syncing angle {angle.label!r} against the primary angle")
-        s = store.load(session_id)
-        a = next(x for x in s.angles if x.id == angle.id)
-        p = s.primary_angle()
-        try:
-            primary_path = store.session_dir(session_id) / p.filename
-            angle_path = store.session_dir(session_id) / a.filename
-            a.offset_seconds = sync.estimate_offset_seconds(primary_path, angle_path)
-            a.sync_status = "synced"
-            a.sync_error = None
-        except sync.SyncFailed as exc:
-            a.sync_status = "failed"
-            a.sync_error = str(exc)
-        store.save(s)
+        _concat_probe_and_sync(
+            session_id, angle.id, part_paths, final_path, progress_cb, sync_against_primary=True
+        )
 
-    jobs.start("sync_angle", session_id, work)
+    jobs.start("add_angle", session_id, work)
     return angle
+
+
+@app.post("/api/sessions/{session_id}/angles/{angle_id}/append")
+async def append_angle_footage(session_id: str, angle_id: str, files: List[UploadFile]) -> dict:
+    """Add more footage to an angle whose recording turned out to be split
+    across several files - e.g. a camera stopped partway through and you
+    only found the second file afterwards. The new part(s) are joined onto
+    the angle's existing file, in the order given, and the angle is
+    re-synced (for the primary angle, just re-probed - it doesn't sync
+    against itself)."""
+    session = _get_session_or_404(session_id)
+    angle = _get_angle_or_404(session, angle_id)
+    if not files:
+        raise HTTPException(400, "select at least one video file")
+    if angle.sync_status == "pending":
+        raise HTTPException(400, "this angle is still being processed - wait for it to finish first")
+
+    existing_path = store.session_dir(session_id) / angle.filename
+    new_part_paths = await _save_upload_parts(session_id, f"angle_{angle_id}_append", files)
+    all_parts = [existing_path] + new_part_paths
+    final_path = existing_path  # keep the angle's existing filename
+
+    angle.sync_status = "pending"
+    store.save(session)
+
+    def work(progress_cb):
+        _concat_probe_and_sync(
+            session_id, angle_id, all_parts, final_path, progress_cb,
+            sync_against_primary=not angle.is_primary,
+        )
+
+    job = jobs.start("append_angle_footage", session_id, work)
+    return {"job_id": job.id}
 
 
 @app.delete("/api/sessions/{session_id}/angles/{angle_id}")

@@ -126,7 +126,7 @@ def test_full_pipeline(client):
         res = client.post(
             "/api/sessions",
             params={"name": "Test Session"},
-            files={"file": ("test_session.mp4", f, "video/mp4")},
+            files={"files": ("test_session.mp4", f, "video/mp4")},
         )
     assert res.status_code == 200, res.text
     session = res.json()

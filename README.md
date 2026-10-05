@@ -7,7 +7,10 @@ you, so nobody has to scrub through 2 hours of footage by hand.
 
 - Handles up to three synchronized camera **angles** of the same recording
   (e.g. 1x/2x/4x), auto-aligning them by audio even when they have different
-  start times or one stopped recording early.
+  start times or one stopped recording early. If a camera's recording is
+  itself split across multiple files (it stopped and was restarted), upload
+  them together or add the missing part later - they're joined into one
+  continuous file automatically.
 - Finds every story/parable/Q&A moment worth clipping, not just a handful -
   a dense ~2 hour session commonly yields 20-40+ clips.
 - Every clip renders as one vertical 9:16 format, with burned-in English
@@ -37,7 +40,12 @@ identically on both platforms.
    timeline. Optionally **add more angles** (other cameras of the same
    recording); each gets auto-synced against the primary by cross-correlating
    their audio, so you don't need to manually figure out the time offset
-   between cameras that started at different moments.
+   between cameras that started at different moments. If any angle's
+   recording was split across multiple files (its camera stopped and was
+   restarted), select all the files together when uploading (oldest first),
+   or use "Add more footage" on that angle later if you find a missing part
+   afterwards - they're joined into one continuous file (losslessly, where
+   possible) before syncing.
 2. **Transcribe** - runs [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
    locally on the primary angle (free, no upload of your footage anywhere)
    and produces a timestamped transcript.
@@ -181,4 +189,9 @@ convention against synthetic signals with a known, constructed offset -
 important since a flipped sign there would silently cut the wrong footage
 for every non-primary angle. `tests/test_multi_angle.py` exercises offset
 application (and the "angle stopped recording early" clamp/reject paths)
-against real ffmpeg output.
+against real ffmpeg output. `tests/test_video_concat.py` covers joining a
+split recording's parts (the lossless and re-encoding-fallback paths, and -
+importantly - that a genuinely unreadable part fails loudly rather than
+being silently dropped, which the ffmpeg concat demuxer does on its own if
+you don't check for it). `tests/test_split_angle_upload.py` exercises the
+same thing end-to-end through the actual upload/append API endpoints.

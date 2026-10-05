@@ -134,11 +134,21 @@ function renderAngles(session) {
       const del = !a.is_primary
         ? `<button class="secondary delete-angle-btn" data-angle="${a.id}">Remove</button>`
         : "";
-      return `<div class="angle-row">
-        <strong>${escapeHtml(a.label)}</strong>
-        <span class="status-pill">${badge}${extra}</span>
-        ${a.sync_error ? `<span class="error-note">${escapeHtml(a.sync_error)}</span>` : ""}
-        ${retry} ${del}
+      const appendForm = a.sync_status !== "pending"
+        ? `<form class="append-footage-form" data-angle="${a.id}">
+            <input type="file" class="append-footage-file" accept="video/*" multiple required />
+            <button type="submit" class="secondary">Add more footage</button>
+            <span class="progress-note append-footage-note"></span>
+          </form>`
+        : "";
+      return `<div class="angle-row-wrap">
+        <div class="angle-row">
+          <strong>${escapeHtml(a.label)}</strong>
+          <span class="status-pill">${badge}${extra}</span>
+          ${a.sync_error ? `<span class="error-note">${escapeHtml(a.sync_error)}</span>` : ""}
+          ${retry} ${del}
+        </div>
+        ${appendForm}
       </div>`;
     })
     .join("");
@@ -149,10 +159,11 @@ function renderAngles(session) {
       ${rows}
       <form id="addAngleForm" class="angle-add-form">
         <input type="text" id="angleLabel" placeholder="label, e.g. 2x" required style="width:120px" />
-        <input type="file" id="angleFile" accept="video/*" required />
+        <input type="file" id="angleFile" accept="video/*" multiple required />
         <button type="submit" class="secondary">Add angle</button>
         <span id="angleUploadNote" class="progress-note"></span>
       </form>
+      <div class="progress-note">If an angle's recording was split across files (camera stopped partway), select all of them together, oldest first - or use "Add more footage" below if you find a missing part later.</div>
     </div>
   `;
 
@@ -173,18 +184,37 @@ function renderAngles(session) {
   document.getElementById("addAngleForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const label = document.getElementById("angleLabel").value;
-    const file = document.getElementById("angleFile").files[0];
+    const files = [...document.getElementById("angleFile").files];
     const note = document.getElementById("angleUploadNote");
     note.textContent = "Uploading...";
     const form = new FormData();
-    form.append("file", file);
+    for (const f of files) form.append("files", f);
     try {
       await api(`/api/sessions/${session.id}/angles?${new URLSearchParams({ label })}`, { method: "POST", body: form });
-      note.textContent = "Uploaded, syncing...";
+      note.textContent = "Uploaded, processing...";
       pollUntilAnglesSettled(session.id);
     } catch (err) {
       note.innerHTML = `<span class="error-note">${escapeHtml(err.message)}</span>`;
     }
+  });
+
+  el.querySelectorAll(".append-footage-form").forEach((form) => {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const angleId = form.dataset.angle;
+      const files = [...form.querySelector(".append-footage-file").files];
+      const note = form.querySelector(".append-footage-note");
+      note.textContent = "Uploading...";
+      const body = new FormData();
+      for (const f of files) body.append("files", f);
+      try {
+        await api(`/api/sessions/${session.id}/angles/${angleId}/append`, { method: "POST", body });
+        note.textContent = "Uploaded, re-processing...";
+        pollUntilAnglesSettled(session.id);
+      } catch (err) {
+        note.innerHTML = `<span class="error-note">${escapeHtml(err.message)}</span>`;
+      }
+    });
   });
 }
 
@@ -389,13 +419,13 @@ function pollJob(jobId, onUpdate) {
 document.getElementById("newSessionForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const name = document.getElementById("newSessionName").value;
-  const file = document.getElementById("newSessionFile").files[0];
+  const files = [...document.getElementById("newSessionFile").files];
   const progress = document.getElementById("uploadProgress");
   progress.textContent = "Uploading...";
 
   const params = new URLSearchParams({ name });
   const form = new FormData();
-  form.append("file", file);
+  for (const f of files) form.append("files", f);
 
   const xhr = new XMLHttpRequest();
   xhr.open("POST", `/api/sessions?${params.toString()}`);

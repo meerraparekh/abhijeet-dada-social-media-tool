@@ -135,7 +135,11 @@ video { width: 100%; max-height: 360px; background: black; border-radius: 8px; }
   flex-direction: column;
   gap: 6px;
 }
+.angle-row-wrap { border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+.angle-row-wrap:last-of-type { border-bottom: none; padding-bottom: 0; }
 .angle-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+.append-footage-form { display: flex; gap: 8px; align-items: center; margin: 4px 0 2px 16px; }
+.append-footage-form input[type=file] { max-width: 260px; }
 .angle-add-form { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
 .angle-add-form input[type=text] { width: 120px; }
 .angle-add-form input[type=file] { flex: 1; }
