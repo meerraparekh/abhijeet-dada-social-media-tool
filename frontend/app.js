@@ -109,7 +109,12 @@ async function renderMain() {
 
 async function deleteSession(id) {
   if (!confirm("Delete this session and all its clips?")) return;
-  await api(`/api/sessions/${id}`, { method: "DELETE" });
+  try {
+    await api(`/api/sessions/${id}`, { method: "DELETE" });
+  } catch (err) {
+    alert(`Couldn't delete this session: ${err.message}`);
+    return;
+  }
   state.currentId = null;
   await loadSessions();
   await renderMain();
@@ -176,7 +181,12 @@ function renderAngles(session) {
   el.querySelectorAll(".delete-angle-btn").forEach((btn) => {
     btn.onclick = async () => {
       if (!confirm("Remove this angle? Any clips already rendered from it stay on disk.")) return;
-      await api(`/api/sessions/${session.id}/angles/${btn.dataset.angle}`, { method: "DELETE" });
+      try {
+        await api(`/api/sessions/${session.id}/angles/${btn.dataset.angle}`, { method: "DELETE" });
+      } catch (err) {
+        alert(`Couldn't remove this angle: ${err.message}`);
+        return;
+      }
       renderMain();
     };
   });
