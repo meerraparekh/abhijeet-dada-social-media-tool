@@ -8,6 +8,7 @@ since it's just a browser hitting a local server.
 """
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List, Optional
 
@@ -31,7 +32,36 @@ from services import (
     video_concat,
 )
 
-app = FastAPI(title="Satsang Clips")
+
+def _reconcile_interrupted_jobs() -> None:
+    """Background jobs live only in memory (jobs.py) - a server restart
+    (including the --reload auto-restart on a code change) silently kills
+    any job that was still running, but an angle's own sync_status is
+    persisted and would otherwise be left showing "pending" forever: no job
+    is actually working on it anymore, yet nothing in the UI offers a way
+    to retry a "pending" angle (only a "failed" one has a Retry button) -
+    and a "pending" angle can't be deleted either. At the moment the server
+    starts, zero jobs have run yet, so any angle still marked "pending" is
+    unambiguously orphaned from a previous run - flip it to "failed" so
+    it's both retryable and deletable again."""
+    for session in store.list_all():
+        changed = False
+        for angle in session.angles:
+            if angle.sync_status == "pending":
+                angle.sync_status = "failed"
+                angle.sync_error = "Interrupted by a server restart - click Retry sync."
+                changed = True
+        if changed:
+            store.save(session)
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    _reconcile_interrupted_jobs()
+    yield
+
+
+app = FastAPI(title="Satsang Clips", lifespan=_lifespan)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = REPO_ROOT / "frontend"
