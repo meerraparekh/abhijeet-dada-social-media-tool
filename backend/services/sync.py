@@ -19,6 +19,12 @@ from scipy.signal import correlate
 SAMPLE_RATE = 4000  # plenty for speech-timing alignment; keeps arrays small
 WINDOW_SECONDS = 300  # only the first 5 minutes of each angle is needed to sync
 MAX_OFFSET_SECONDS = 180  # angles are assumed to start within 3 minutes of each other
+# A hung/stuck ffmpeg process (a malformed file, an exotic codec) would
+# otherwise block the sync job - and its own session's folder from being
+# deleted, since Windows won't unlink a file another process still has
+# open - forever. Extracting 5 minutes of audio should never genuinely take
+# this long even from a large source file; if it does, something's wrong.
+FFMPEG_TIMEOUT_SECONDS = 300
 
 
 class SyncFailed(Exception):
@@ -34,7 +40,15 @@ def _extract_mono_audio(video_path: Path, duration: float) -> np.ndarray:
         "-vn", "-ac", "1", "-ar", str(SAMPLE_RATE),
         "-f", "f32le", "-",
     ]
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        result = subprocess.run(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=FFMPEG_TIMEOUT_SECONDS
+        )
+    except subprocess.TimeoutExpired:
+        raise SyncFailed(
+            f"ffmpeg audio extraction timed out after {FFMPEG_TIMEOUT_SECONDS}s for "
+            f"{video_path.name} - the file may be corrupt or in an unusual format"
+        )
     if result.returncode != 0:
         stderr = result.stderr[-2000:].decode(errors="replace")
         raise SyncFailed(f"ffmpeg audio extraction failed for {video_path.name}: {stderr}")
@@ -54,7 +68,12 @@ def probe_duration_seconds(video_path: Path) -> float:
         "-of", "json",
         str(video_path),
     ]
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        result = subprocess.run(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=FFMPEG_TIMEOUT_SECONDS
+        )
+    except subprocess.TimeoutExpired:
+        raise SyncFailed(f"ffprobe timed out after {FFMPEG_TIMEOUT_SECONDS}s for {video_path.name}")
     if result.returncode != 0:
         stderr = result.stderr[-2000:].decode(errors="replace")
         raise SyncFailed(f"ffprobe failed for {video_path.name}: {stderr}")

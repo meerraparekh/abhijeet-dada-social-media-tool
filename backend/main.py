@@ -179,7 +179,14 @@ def get_session(session_id: str) -> Session:
 
 @app.delete("/api/sessions/{session_id}")
 def delete_session(session_id: str) -> dict:
-    store.delete(session_id)
+    try:
+        store.delete(session_id)
+    except OSError as exc:
+        raise HTTPException(
+            409,
+            f"couldn't delete this session - one of its files may still be open in another "
+            f"process (e.g. a sync or render still running). Try again in a moment. ({exc})",
+        )
     return {"ok": True}
 
 
@@ -266,7 +273,19 @@ def delete_angle(session_id: str, angle_id: str) -> dict:
     angle = _get_angle_or_404(session, angle_id)
     if angle.is_primary:
         raise HTTPException(400, "cannot delete the primary angle")
-    (store.session_dir(session_id) / angle.filename).unlink(missing_ok=True)
+    if angle.sync_status == "pending":
+        raise HTTPException(
+            400,
+            "this angle is still being processed - wait for it to finish (or fail) before removing it",
+        )
+    try:
+        (store.session_dir(session_id) / angle.filename).unlink(missing_ok=True)
+    except OSError as exc:
+        raise HTTPException(
+            409,
+            f"couldn't delete this angle's video file - it may still be open in another "
+            f"process (e.g. a sync still running). Try again in a moment. ({exc})",
+        )
     session.angles = [a for a in session.angles if a.id != angle_id]
     store.save(session)
     return {"ok": True}

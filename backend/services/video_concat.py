@@ -19,18 +19,37 @@ class ConcatFailed(Exception):
     pass
 
 
-def _run(cmd: List[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+# A hung ffmpeg process would otherwise block the job - and the file it has
+# open from being deleted (Windows won't unlink a file another process
+# still has a handle on) - forever. The stream-copy join only remuxes (no
+# decoding), so it should always be fast regardless of file size; the
+# re-encode fallback has to actually decode+encode the full combined
+# duration, so its budget scales with how much content there is instead of
+# a fixed cap.
+PROBE_TIMEOUT_SECONDS = 120
+STREAM_COPY_TIMEOUT_SECONDS = 300
+MIN_REENCODE_TIMEOUT_SECONDS = 600
+REENCODE_TIMEOUT_MULTIPLE = 3  # budget = this many times the real-time duration
+
+
+def _run(cmd: List[str], timeout: float) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(cmd, returncode=124, stdout=f"ffmpeg timed out after {timeout:.0f}s")
 
 
 def _probe_duration(path: Path) -> float:
     """Best-effort duration probe - returns 0.0 (rather than raising) for a
     file ffprobe can't read, since this is only used to sanity-check a
     concat result against expectations, not as a hard dependency."""
-    result = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=PROBE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return 0.0
     try:
         return float(result.stdout.strip())
     except ValueError:
@@ -89,7 +108,7 @@ def concat_videos(parts: List[Path], out_path: Path) -> None:
         result = _run([
             "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(list_file),
             "-c", "copy", str(tmp_out),
-        ])
+        ], timeout=STREAM_COPY_TIMEOUT_SECONDS)
         ok = (
             result.returncode == 0
             and tmp_out.exists()
@@ -115,7 +134,7 @@ def concat_videos(parts: List[Path], out_path: Path) -> None:
                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
                 "-c:a", "aac", "-b:a", "192k",
                 str(tmp_out),
-            ])
+            ], timeout=max(expected_duration * REENCODE_TIMEOUT_MULTIPLE, MIN_REENCODE_TIMEOUT_SECONDS))
             ok2 = (
                 result2.returncode == 0
                 and tmp_out.exists()
