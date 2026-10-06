@@ -136,7 +136,7 @@ function renderAngles(session) {
         : "";
       const appendForm = a.sync_status !== "pending"
         ? `<form class="append-footage-form" data-angle="${a.id}">
-            <input type="file" class="append-footage-file" accept="video/*" multiple required />
+            <input type="file" class="append-footage-file" accept="video/*,.mp4,.mov,.m4v,.avi,.mkv,.wmv,.mts,.m2ts" multiple required />
             <button type="submit" class="secondary">Add more footage</button>
             <span class="progress-note append-footage-note"></span>
           </form>`
@@ -159,7 +159,7 @@ function renderAngles(session) {
       ${rows}
       <form id="addAngleForm" class="angle-add-form">
         <input type="text" id="angleLabel" placeholder="label, e.g. 2x" required style="width:120px" />
-        <input type="file" id="angleFile" accept="video/*" multiple required />
+        <input type="file" id="angleFile" accept="video/*,.mp4,.mov,.m4v,.avi,.mkv,.wmv,.mts,.m2ts" multiple required />
         <button type="submit" class="secondary">Add angle</button>
         <span id="angleUploadNote" class="progress-note"></span>
       </form>
