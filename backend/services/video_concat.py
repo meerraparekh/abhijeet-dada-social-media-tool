@@ -25,10 +25,16 @@ class ConcatFailed(Exception):
 # decoding), so it should always be fast regardless of file size; the
 # re-encode fallback has to actually decode+encode the full combined
 # duration, so its budget scales with how much content there is instead of
-# a fixed cap.
+# a fixed cap - but still capped at an absolute ceiling: an uncapped
+# duration-scaled budget meant a ~2.5 hour session's re-encode fallback
+# could legitimately run for 7+ hours before ever timing out, which in
+# practice is indistinguishable from "stuck forever" to someone waiting on
+# it. If a re-encode genuinely needs longer than the ceiling, something
+# other than "it's just slow" is almost certainly wrong anyway.
 PROBE_TIMEOUT_SECONDS = 120
 STREAM_COPY_TIMEOUT_SECONDS = 300
 MIN_REENCODE_TIMEOUT_SECONDS = 600
+MAX_REENCODE_TIMEOUT_SECONDS = 2700  # 45 minutes
 REENCODE_TIMEOUT_MULTIPLE = 3  # budget = this many times the real-time duration
 
 
@@ -60,6 +66,13 @@ def _duration_matches(actual: float, expected: float) -> bool:
     # A little tolerance for container/rounding overhead on a legitimate
     # join; anything bigger means content actually went missing.
     return abs(actual - expected) <= max(2.0, expected * 0.05)
+
+
+def _reencode_timeout_seconds(expected_duration: float) -> float:
+    return min(
+        max(expected_duration * REENCODE_TIMEOUT_MULTIPLE, MIN_REENCODE_TIMEOUT_SECONDS),
+        MAX_REENCODE_TIMEOUT_SECONDS,
+    )
 
 
 def concat_videos(parts: List[Path], out_path: Path) -> None:
@@ -134,7 +147,7 @@ def concat_videos(parts: List[Path], out_path: Path) -> None:
                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
                 "-c:a", "aac", "-b:a", "192k",
                 str(tmp_out),
-            ], timeout=max(expected_duration * REENCODE_TIMEOUT_MULTIPLE, MIN_REENCODE_TIMEOUT_SECONDS))
+            ], timeout=_reencode_timeout_seconds(expected_duration))
             ok2 = (
                 result2.returncode == 0
                 and tmp_out.exists()

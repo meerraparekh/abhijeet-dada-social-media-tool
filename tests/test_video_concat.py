@@ -11,7 +11,14 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "backend"))
 
-from services.video_concat import ConcatFailed, concat_videos  # noqa: E402
+from services.video_concat import (  # noqa: E402
+    ConcatFailed,
+    MAX_REENCODE_TIMEOUT_SECONDS,
+    MIN_REENCODE_TIMEOUT_SECONDS,
+    REENCODE_TIMEOUT_MULTIPLE,
+    _reencode_timeout_seconds,
+    concat_videos,
+)
 
 
 def _make_clip(path: Path, duration: float, color: str, resolution: str = "320x240", vcodec: str = "libx264", acodec: str = "aac") -> None:
@@ -111,3 +118,29 @@ def test_appending_to_an_existing_file_reuses_its_path(tmp_path):
     assert existing.exists()
     assert _probe_duration(existing) == pytest.approx(4.0, abs=0.5)
     assert not new_part.exists()
+
+
+def test_reencode_timeout_is_capped_for_long_sessions():
+    """Regression test for a real bug hit in production: an uncapped
+    duration-scaled timeout meant a ~2.5 hour session's re-encode fallback
+    could legitimately run for 7+ hours before ever timing out - which in
+    practice is indistinguishable from "stuck forever" to someone waiting
+    on it."""
+    two_and_a_half_hours = 2.5 * 3600
+    assert _reencode_timeout_seconds(two_and_a_half_hours) == MAX_REENCODE_TIMEOUT_SECONDS
+    # sanity check the un-capped formula really would have blown past the
+    # ceiling for this input, so this test would actually catch a
+    # regression back to the uncapped version
+    assert two_and_a_half_hours * REENCODE_TIMEOUT_MULTIPLE > MAX_REENCODE_TIMEOUT_SECONDS
+
+
+def test_reencode_timeout_still_scales_up_for_short_clips():
+    # a tiny clip's budget should be the floor, not the (even tinier) scaled value
+    assert _reencode_timeout_seconds(5.0) == MIN_REENCODE_TIMEOUT_SECONDS
+
+
+def test_reencode_timeout_scales_with_duration_between_the_floor_and_ceiling():
+    ten_minutes = 600.0
+    expected = ten_minutes * REENCODE_TIMEOUT_MULTIPLE
+    assert MIN_REENCODE_TIMEOUT_SECONDS < expected < MAX_REENCODE_TIMEOUT_SECONDS
+    assert _reencode_timeout_seconds(ten_minutes) == expected
