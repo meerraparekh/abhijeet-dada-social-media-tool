@@ -66,7 +66,8 @@ def test_delete_angle_reports_a_locked_file_clearly_instead_of_crashing(client, 
     session_id = res.json()["id"]
 
     s = store.load(session_id)
-    angle = VideoAngle(label="2x", filename="angle_x.mp4", sync_status="synced")
+    angle = VideoAngle(label="2x", filename="", sync_status="synced")
+    angle.filename = f"angle_{angle.id}.mp4"  # matches the real naming convention used in main.py
     s.angles.append(angle)
     store.save(s)
     (store.session_dir(session_id) / angle.filename).write_bytes(b"stand-in for a locked file")
@@ -139,3 +140,42 @@ def test_delete_session_retries_and_succeeds_if_the_lock_clears(client, monkeypa
     res = client.delete(f"/api/sessions/{session_id}")
     assert res.status_code == 200, res.text
     assert calls["n"] == 2
+
+
+def test_delete_angle_with_no_filename_cleans_up_orphaned_part_files(client, tmp_path):
+    """Regression test for a real bug: when a split-recording concat job
+    fails (e.g. times out), it returns before ever recording a filename on
+    the angle, leaving angle.filename == "". Deleting such an angle used to
+    try to unlink session_dir / "" - the session directory itself - which
+    Windows refuses with "Access is denied" rather than a clean
+    not-found. The original uploaded part files for a failed join are also
+    deliberately left on disk (so nothing is lost on failure) and need
+    cleaning up here too, not just whatever the final filename would have
+    been."""
+    import store
+    from schemas import VideoAngle
+
+    res = client.post(
+        "/api/sessions", params={"name": "s"},
+        files={"files": ("primary.mp4", b"not real but unused here", "video/mp4")},
+    )
+    session_id = res.json()["id"]
+
+    s = store.load(session_id)
+    angle = VideoAngle(label="4x", filename="", sync_status="failed", sync_error="ffmpeg timed out after 2700s")
+    s.angles.append(angle)
+    store.save(s)
+
+    session_dir = store.session_dir(session_id)
+    part0 = session_dir / f"angle_{angle.id}_part0.mp4"
+    part1 = session_dir / f"angle_{angle.id}_part1.mp4"
+    part0.write_bytes(b"orphaned part 0")
+    part1.write_bytes(b"orphaned part 1")
+
+    res = client.delete(f"/api/sessions/{session_id}/angles/{angle.id}")
+    assert res.status_code == 200, res.text
+
+    assert not part0.exists()
+    assert not part1.exists()
+    s = store.load(session_id)
+    assert not any(a.id == angle.id for a in s.angles)

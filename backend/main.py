@@ -331,7 +331,22 @@ def delete_angle(session_id: str, angle_id: str) -> dict:
             "this angle is still being processed - wait for it to finish (or fail) before removing it",
         )
     try:
-        _retry_on_locked_file(lambda: (store.session_dir(session_id) / angle.filename).unlink(missing_ok=True))
+        def _cleanup_angle_files() -> None:
+            session_dir = store.session_dir(session_id)
+            # Glob by angle id prefix rather than just angle.filename: a
+            # concat that failed (e.g. timed out) never reaches the point
+            # of recording a filename, leaving it empty - unlinking an
+            # empty filename resolves to the session directory itself,
+            # which Windows refuses to delete this way ("Access is
+            # denied") rather than raising a normal "not found". The
+            # original uploaded part files for a failed join are also left
+            # on disk deliberately (so nothing already uploaded is lost on
+            # failure) and need cleaning up here too, not just the final
+            # filename, which never got created for them to replace.
+            for f in session_dir.glob(f"angle_{angle_id}*"):
+                f.unlink(missing_ok=True)
+
+        _retry_on_locked_file(_cleanup_angle_files)
     except OSError as exc:
         raise HTTPException(
             409,
