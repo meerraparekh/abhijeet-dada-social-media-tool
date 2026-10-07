@@ -109,3 +109,33 @@ def test_delete_session_reports_a_locked_file_clearly_instead_of_crashing(client
     res = client.delete(f"/api/sessions/{session_id}")
     assert res.status_code == 409
     assert "open in another process" in res.json()["detail"]
+
+
+def test_delete_session_retries_and_succeeds_if_the_lock_clears(client, monkeypatch):
+    """The frontend now releases its own video connection before deleting,
+    but the server-side teardown isn't necessarily instant - a transient
+    lock (clears within a couple of retries) should succeed rather than
+    surfacing an error the user would have to manually retry themselves."""
+    res = client.post(
+        "/api/sessions", params={"name": "s"},
+        files={"files": ("primary.mp4", b"not real but unused here", "video/mp4")},
+    )
+    session_id = res.json()["id"]
+
+    import shutil
+
+    calls = {"n": 0}
+    real_rmtree = shutil.rmtree
+
+    def flaky_rmtree(path, *a, **kw):
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise PermissionError(32, "The process cannot access the file because it is being used by another process")
+        return real_rmtree(path, *a, **kw)
+
+    monkeypatch.setattr(shutil, "rmtree", flaky_rmtree)
+    monkeypatch.setattr("main.time.sleep", lambda _: None)  # keep the test fast
+
+    res = client.delete(f"/api/sessions/{session_id}")
+    assert res.status_code == 200, res.text
+    assert calls["n"] == 2

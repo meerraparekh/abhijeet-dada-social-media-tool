@@ -8,9 +8,10 @@ since it's just a browser hitting a local server.
 """
 from __future__ import annotations
 
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional, TypeVar
 
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -81,6 +82,27 @@ def _get_angle_or_404(session: Session, angle_id: str) -> VideoAngle:
     if not angle:
         raise HTTPException(404, "angle not found")
     return angle
+
+
+_T = TypeVar("_T")
+
+
+def _retry_on_locked_file(fn: Callable[[], _T], attempts: int = 3, delay_seconds: float = 0.5) -> _T:
+    """Deleting a video file right after the browser's own player stops
+    showing it is a very common path (the "Delete session"/"Remove"
+    buttons always act on whatever's currently displayed) - the frontend
+    unloads the player first, but closing that connection server-side
+    isn't necessarily instant, and another tab/window could still have it
+    open too. A couple of short retries absorbs that without the caller
+    needing to think about it; a lock that's still held after this many
+    attempts is treated as a real "try again later" case."""
+    for attempt in range(attempts):
+        try:
+            return fn()
+        except OSError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay_seconds)
 
 
 async def _save_upload_parts(session_id: str, prefix: str, files: List[UploadFile]) -> List[Path]:
@@ -210,7 +232,7 @@ def get_session(session_id: str) -> Session:
 @app.delete("/api/sessions/{session_id}")
 def delete_session(session_id: str) -> dict:
     try:
-        store.delete(session_id)
+        _retry_on_locked_file(lambda: store.delete(session_id))
     except OSError as exc:
         raise HTTPException(
             409,
@@ -309,7 +331,7 @@ def delete_angle(session_id: str, angle_id: str) -> dict:
             "this angle is still being processed - wait for it to finish (or fail) before removing it",
         )
     try:
-        (store.session_dir(session_id) / angle.filename).unlink(missing_ok=True)
+        _retry_on_locked_file(lambda: (store.session_dir(session_id) / angle.filename).unlink(missing_ok=True))
     except OSError as exc:
         raise HTTPException(
             409,

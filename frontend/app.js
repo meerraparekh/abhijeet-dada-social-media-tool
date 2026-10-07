@@ -109,6 +109,12 @@ async function renderMain() {
 
 async function deleteSession(id) {
   if (!confirm("Delete this session and all its clips?")) return;
+  // The session being deleted here is always the one currently shown, so
+  // its video is very likely still loaded in the player - on Windows the
+  // server can't delete a file the browser still has an open connection
+  // to, so release it first and give the disconnect a moment to land
+  // server-side before issuing the delete.
+  await unloadPlayer();
   try {
     await api(`/api/sessions/${id}`, { method: "DELETE" });
   } catch (err) {
@@ -118,6 +124,15 @@ async function deleteSession(id) {
   state.currentId = null;
   await loadSessions();
   await renderMain();
+}
+
+async function unloadPlayer() {
+  const player = document.getElementById("player");
+  if (!player) return;
+  player.pause();
+  player.removeAttribute("src");
+  player.load();
+  await new Promise((resolve) => setTimeout(resolve, 300));
 }
 
 const SYNC_LABELS = {
@@ -181,6 +196,14 @@ function renderAngles(session) {
   el.querySelectorAll(".delete-angle-btn").forEach((btn) => {
     btn.onclick = async () => {
       if (!confirm("Remove this angle? Any clips already rendered from it stay on disk.")) return;
+      const primary = session.angles.find((a) => a.is_primary);
+      const currentPreviewId = state.previewAngleId || (primary && primary.id);
+      if (btn.dataset.angle === currentPreviewId) {
+        // Same reasoning as deleteSession: if this angle's video is the one
+        // currently loaded in the player, the server can't delete its file
+        // on Windows until that connection is released.
+        await unloadPlayer();
+      }
       try {
         await api(`/api/sessions/${session.id}/angles/${btn.dataset.angle}`, { method: "DELETE" });
       } catch (err) {
