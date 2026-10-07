@@ -144,3 +144,48 @@ def test_reencode_timeout_scales_with_duration_between_the_floor_and_ceiling():
     expected = ten_minutes * REENCODE_TIMEOUT_MULTIPLE
     assert MIN_REENCODE_TIMEOUT_SECONDS < expected < MAX_REENCODE_TIMEOUT_SECONDS
     assert _reencode_timeout_seconds(ten_minutes) == expected
+
+
+def _make_clip_with_streams(path: Path, duration: float, color: str, stream_args: list) -> None:
+    subprocess.run(
+        [
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i", f"sine=frequency=440:duration={duration}",
+            "-f", "lavfi", "-i", f"color=c={color}:s=320x240:d={duration}",
+            "-f", "lavfi", "-i", f"sine=frequency=880:duration={duration}",
+            "-shortest", *stream_args,
+            "-c:v", "libx264", "-c:a", "aac",
+            str(path),
+        ],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=True,
+    )
+
+
+def test_extra_trailing_audio_track_on_one_part_does_not_corrupt_the_join(tmp_path):
+    """Regression test for a real-world case: a phone recording's parts can
+    carry a different number of extra tracks beyond picture + the real
+    audio (spatial/positional audio, embedded motion metadata) even when
+    they're otherwise from the same camera/session - concat_videos must
+    only ever keep the real video and audio, not let the extra tracks
+    affect (or appear in) the result."""
+    part1 = tmp_path / "part1.mp4"
+    part2 = tmp_path / "part2.mp4"
+    # part1: just video + the real audio
+    _make_clip_with_streams(part1, 3, "blue", ["-map", "1:v", "-map", "0:a"])
+    # part2: video + real audio in the same leading order, plus one extra
+    # trailing audio track part1 doesn't have
+    _make_clip_with_streams(part2, 3, "red", ["-map", "1:v", "-map", "0:a", "-map", "2:a"])
+
+    out = tmp_path / "out.mp4"
+    concat_videos([part1, part2], out)
+
+    assert out.exists()
+    assert _probe_duration(out) == pytest.approx(6.0, abs=0.5)
+    # only picture + the one real audio track should survive - never the
+    # extra one
+    result = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(out)],
+        stdout=subprocess.PIPE, text=True, check=True,
+    )
+    stream_types = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    assert stream_types == ["video", "audio"]

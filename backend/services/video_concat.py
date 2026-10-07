@@ -120,6 +120,16 @@ def concat_videos(parts: List[Path], out_path: Path) -> None:
     try:
         result = _run([
             "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(list_file),
+            # Explicit stream selection, not just "-c copy": phone recordings
+            # commonly carry extra tracks beyond picture + the real audio
+            # (spatial/positional audio variants, embedded motion/gyro
+            # metadata) and the exact count of these can differ between
+            # parts even from the same camera/session (one extra metadata
+            # track on one part was enough to corrupt a copy-everything
+            # join in testing - wrong duration, non-monotonic timestamps).
+            # This app only ever needs the picture and the real audio, so
+            # there's no reason to carry the rest through at all.
+            "-map", "0:v:0", "-map", "0:a:0",
             "-c", "copy", str(tmp_out),
         ], timeout=STREAM_COPY_TIMEOUT_SECONDS)
         ok = (
