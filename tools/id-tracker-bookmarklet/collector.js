@@ -601,16 +601,53 @@
     body.appendChild(hint);
   }
 
+  // Clicking and Enter-while-hovering both fail on genuinely disabled form
+  // fields in some browsers/configurations — so picking always also shows a
+  // live "Hovering: ..." readout plus a normal, always-clickable "Pick
+  // hovered element" button in the panel itself (which is never part of
+  // the page, so it's never disabled). That button is the guaranteed path;
+  // click/Enter are just faster shortcuts when they work.
   function startPicking(target, onPicked) {
     stopPicking();
     var prevOutline = null, prevEl = null;
 
-    function onMouseOver(e) {
-      if (panel.contains(e.target)) return;
+    var liveBox = document.createElement('div');
+    liveBox.style.cssText = 'margin-top:8px;padding:6px;border:1px dashed #555;border-radius:6px;font-size:11px;color:#aaa;';
+    var hoverLabel = document.createElement('div');
+    hoverLabel.textContent = 'Hovering: (move your mouse over the value)';
+    liveBox.appendChild(hoverLabel);
+    var confirmBtn = button('✅ Pick hovered element', function () {
+      if (!prevEl) return;
+      var el = prevEl;
+      cleanup();
+      onPicked(el);
+    }, '#2f9e44');
+    confirmBtn.disabled = true;
+    confirmBtn.style.opacity = '0.5';
+    liveBox.appendChild(confirmBtn);
+    body.appendChild(liveBox);
+
+    function describe(el) {
+      var tag = el.tagName ? el.tagName.toLowerCase() : '?';
+      var text = (el.value || el.textContent || '').replace(/\s+/g, ' ').trim();
+      return tag + (text ? ': "' + text.slice(0, 40) + (text.length > 40 ? '…' : '') + '"' : ' (no text)');
+    }
+
+    // Uses elementFromPoint (pure geometry) rather than trusting the
+    // hovered element to dispatch its own mouseover — a disabled form
+    // control's event behavior varies enough across browsers that relying
+    // on it to fire anything at all isn't safe. This can't be suppressed
+    // by any element's disabled state.
+    function onMouseMove(e) {
+      var el = document.elementFromPoint ? document.elementFromPoint(e.clientX, e.clientY) : e.target;
+      if (!el || el === prevEl || panel.contains(el)) return;
       if (prevEl) prevEl.style.outline = prevOutline;
-      prevEl = e.target;
+      prevEl = el;
       prevOutline = prevEl.style.outline;
       prevEl.style.outline = '2px solid #fab005';
+      hoverLabel.textContent = 'Hovering: ' + describe(prevEl);
+      confirmBtn.disabled = false;
+      confirmBtn.style.opacity = '1';
     }
     function onClick(e) {
       if (panel.contains(e.target)) return;
@@ -622,8 +659,6 @@
     }
     function onKeyDown(e) {
       if (e.key === 'Escape') { cleanup(); renderSetup(); return; }
-      // Browsers never fire click on a disabled form field (a greyed-out
-      // input/select) — Enter-while-hovering is the only way to pick one.
       if (e.key === 'Enter' && prevEl) {
         e.preventDefault();
         var el = prevEl;
@@ -633,13 +668,13 @@
     }
     function cleanup() {
       if (prevEl) prevEl.style.outline = prevOutline;
-      document.removeEventListener('mouseover', onMouseOver, true);
+      document.removeEventListener('mousemove', onMouseMove, true);
       document.removeEventListener('click', onClick, true);
       document.removeEventListener('keydown', onKeyDown, true);
       pickCleanup = null;
     }
 
-    document.addEventListener('mouseover', onMouseOver, true);
+    document.addEventListener('mousemove', onMouseMove, true);
     document.addEventListener('click', onClick, true);
     document.addEventListener('keydown', onKeyDown, true);
     pickCleanup = cleanup;
@@ -758,7 +793,7 @@
         msg.textContent = (field === 'productLink'
           ? 'Now click the product\'s title/link (whatever opens its detail page) in the FIRST row of the list.'
           : 'Now click the ' + FIELD_LABELS[field] + ' value in the FIRST row of the list.')
-          + ' If it\'s greyed out/disabled (clicking does nothing), hover over it and press Enter instead. Esc to cancel.';
+          + ' If clicking it does nothing (e.g. a greyed-out/disabled field), hover over it and use the "✅ Pick hovered element" button below instead. Esc to cancel.';
         body.appendChild(msg);
         startPicking(field, function (el) {
           var result = handleFieldPick(field, el);
