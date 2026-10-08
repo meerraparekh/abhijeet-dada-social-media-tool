@@ -85,7 +85,18 @@
     return nthChildPath(el);
   }
 
-  function textOf(el) { return el.textContent.replace(/\s+/g, ' ').trim(); }
+  // Form fields (especially disabled/read-only ones, like a locked
+  // Category input) show their text via .value, not .textContent — an
+  // <input> has no text node children at all.
+  function textOf(el) {
+    var tag = el.tagName ? el.tagName.toLowerCase() : '';
+    if (tag === 'input' || tag === 'textarea') return (el.value || '').replace(/\s+/g, ' ').trim();
+    if (tag === 'select') {
+      var opt = el.options && el.options[el.selectedIndex];
+      return ((opt ? opt.text : el.value) || '').replace(/\s+/g, ' ').trim();
+    }
+    return el.textContent.replace(/\s+/g, ' ').trim();
+  }
 
   function sleep(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
 
@@ -158,7 +169,18 @@
       cleanup();
       onPicked(el);
     }
-    function onKeyDown(e) { if (e.key === 'Escape') { cleanup(); renderLauncher(); } }
+    function onKeyDown(e) {
+      if (e.key === 'Escape') { cleanup(); renderLauncher(); return; }
+      // Category is often a greyed-out/disabled field once a product exists —
+      // browsers never fire click on a disabled form control, so hovering +
+      // Enter is the only way to pick one.
+      if (e.key === 'Enter' && prevEl) {
+        e.preventDefault();
+        var el = prevEl;
+        cleanup();
+        onPicked(el);
+      }
+    }
     function cleanup() {
       if (prevEl) prevEl.style.outline = prevOutline;
       document.removeEventListener('mouseover', onMouseOver, true);
@@ -197,7 +219,7 @@
     body.appendChild(button('🎯 Pick Category field', function () {
       body.innerHTML = '';
       var msg = document.createElement('div');
-      msg.textContent = 'Now click the Category value on this page (Esc to cancel)...';
+      msg.textContent = 'Now click the Category value on this page. If it\'s greyed out/disabled (clicking does nothing — common once a product already exists), hover over it and press Enter instead. Esc to cancel.';
       body.appendChild(msg);
       startPicking(function (el) {
         cfg.categorySelector = pickUniqueSelector(el);

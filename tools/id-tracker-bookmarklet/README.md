@@ -209,6 +209,11 @@ going by itself.
 3. Click **🎯 Pick Category field**, then click the real Category value on
    that page (the breadcrumb, like in the screenshot above). This is a
    one-time calibration — it's remembered after this.
+   - **If the Category field is greyed out/disabled** (common once a
+     product already exists — clicking it does nothing, no cursor
+     change): browsers don't let disabled fields respond to clicks at
+     all. Instead, **hover your mouse over it and press Enter** — this
+     works even on disabled fields.
 4. Go back to the list page. The panel now shows **▶ Start enrichment
    (N)** — click it. From here it runs itself: opens the first product,
    reads its Category, shows a 1.5-second "next in..." pause (with a

@@ -268,7 +268,16 @@
     return false;
   }
 
+  // Form fields (especially disabled/read-only ones, like a locked
+  // Category input) show their text via .value, not .textContent — an
+  // <input> has no text node children at all.
   function textOf(el) {
+    var tag = el.tagName ? el.tagName.toLowerCase() : '';
+    if (tag === 'input' || tag === 'textarea') return (el.value || '').replace(/\s+/g, ' ').trim();
+    if (tag === 'select') {
+      var opt = el.options && el.options[el.selectedIndex];
+      return ((opt ? opt.text : el.value) || '').replace(/\s+/g, ' ').trim();
+    }
     return el.textContent.replace(/\s+/g, ' ').trim();
   }
 
@@ -612,7 +621,15 @@
       onPicked(el);
     }
     function onKeyDown(e) {
-      if (e.key === 'Escape') { cleanup(); renderSetup(); }
+      if (e.key === 'Escape') { cleanup(); renderSetup(); return; }
+      // Browsers never fire click on a disabled form field (a greyed-out
+      // input/select) — Enter-while-hovering is the only way to pick one.
+      if (e.key === 'Enter' && prevEl) {
+        e.preventDefault();
+        var el = prevEl;
+        cleanup();
+        onPicked(el);
+      }
     }
     function cleanup() {
       if (prevEl) prevEl.style.outline = prevOutline;
@@ -738,9 +755,10 @@
       row.appendChild(button('🎯 Pick ' + FIELD_LABELS[field] + ' value', function () {
         body.innerHTML = '';
         var msg = document.createElement('div');
-        msg.textContent = field === 'productLink'
-          ? 'Now click the product\'s title/link (whatever opens its detail page) in the FIRST row of the list (Esc to cancel)...'
-          : 'Now click the ' + FIELD_LABELS[field] + ' value in the FIRST row of the list (Esc to cancel)...';
+        msg.textContent = (field === 'productLink'
+          ? 'Now click the product\'s title/link (whatever opens its detail page) in the FIRST row of the list.'
+          : 'Now click the ' + FIELD_LABELS[field] + ' value in the FIRST row of the list.')
+          + ' If it\'s greyed out/disabled (clicking does nothing), hover over it and press Enter instead. Esc to cancel.';
         body.appendChild(msg);
         startPicking(field, function (el) {
           var result = handleFieldPick(field, el);
