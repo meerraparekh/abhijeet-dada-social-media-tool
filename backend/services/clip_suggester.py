@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from schemas import ClipSuggestions, Transcript
 from services.claude_client import call_structured
+from services.transcript_hygiene import looks_hallucinated
 
 # Hand-written mirror of the ClipSuggestions/ClipSuggestion schema for the
 # Messages API's structured-output format. Written out explicitly (rather
@@ -122,6 +123,13 @@ formatting and no overlap requirement with the hashtags field.
 def format_transcript_for_prompt(transcript: Transcript) -> str:
     lines = []
     for seg in transcript.segments:
+        # Whisper occasionally hallucinates nonsense text (a known failure
+        # mode during unclear/near-silent audio) instead of correctly
+        # transcribing nothing - Chinese/Japanese/Korean script has no
+        # business appearing in a Hindi/English talk, so it's a reliable
+        # signal to drop the line rather than feed garbage into the prompt.
+        if looks_hallucinated(seg.text):
+            continue
         lines.append(f"[{_mmss(seg.start)}-{_mmss(seg.end)}] {seg.text}")
     return "\n".join(lines)
 

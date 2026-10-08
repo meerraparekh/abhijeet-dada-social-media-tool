@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from schemas import Transcript, TranscriptWord
 from services.claude_client import call_structured
+from services.transcript_hygiene import looks_hallucinated
 
 SYSTEM_PROMPT = """\
 You translate a spiritual talk's transcript from Hindi (with occasional English
@@ -46,7 +47,15 @@ class _Translations(BaseModel):
 
 def translate_segments(transcript: Transcript) -> List[str]:
     """Returns one English translation string per transcript segment, in order."""
-    numbered = "\n".join(f"{i + 1}. {seg.text}" for i, seg in enumerate(transcript.segments))
+    # Whisper occasionally hallucinates nonsense text (a known failure mode
+    # during unclear/near-silent audio) instead of correctly transcribing
+    # nothing - swapped for a neutral placeholder rather than dropped, since
+    # callers (build_english_caption_words) rely on the translation list
+    # staying the same length and in the same order as transcript.segments.
+    numbered = "\n".join(
+        f"{i + 1}. {'(inaudible)' if looks_hallucinated(seg.text) else seg.text}"
+        for i, seg in enumerate(transcript.segments)
+    )
     result = call_structured(
         system=SYSTEM_PROMPT,
         user_content=f"Segments:\n\n{numbered}",
