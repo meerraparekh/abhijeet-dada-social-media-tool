@@ -39,11 +39,17 @@ def client(tmp_path, monkeypatch):
 
     # --- fake the network-dependent steps ---
     def fake_transcribe(video_path, progress_cb=None):
+        # Repeated to comfortably exceed suggest-clips' minimum-content
+        # sanity check (calibrated for real multi-hour sessions) - a single
+        # short sentence would be legitimately rejected as "too little
+        # content to find clips in", which is the guard working as intended,
+        # not something this fixture should need to work around by being
+        # unrealistically tiny.
         text = (
             "Welcome everyone to this evening's session. Tonight I want to speak about "
             "the nature of stillness. When the mind becomes quiet, we begin to see things "
-            "as they really are."
-        )
+            "as they really are. "
+        ) * 20
         words_text = text.replace(".", "").split()
         n = len(words_text)
         duration = 20.0

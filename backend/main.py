@@ -472,7 +472,23 @@ def suggest_clips(session_id: str) -> dict:
     store.save(session)
 
     def work(progress_cb):
-        progress_cb("asking Claude for clip suggestions")
+        total_segments = len(session.transcript.segments)
+        formatted = clip_suggester.format_transcript_for_prompt(session.transcript)
+        kept_lines = formatted.count("\n") + 1 if formatted else 0
+        progress_cb(
+            f"sending {kept_lines}/{total_segments} transcript segments "
+            f"({len(formatted)} chars) to Claude for clip suggestions"
+        )
+        if len(formatted) < 2000:
+            raise RuntimeError(
+                f"Only {len(formatted)} characters of transcript survived filtering "
+                f"out {total_segments - kept_lines} of {total_segments} segments as "
+                "Whisper hallucinations (Chinese/Japanese/Korean script) - too little "
+                "real content is left to find clips in. This usually means Whisper "
+                "struggled with large portions of this recording, not just one short "
+                "stretch - consider re-transcribing with a larger WHISPER_MODEL_SIZE "
+                "(e.g. 'small') for better accuracy."
+            )
         suggestions = clip_suggester.suggest_clips(session.transcript)
         s = store.load(session_id)
         s.clips = [Clip(**c.model_dump()) for c in suggestions.clips]
