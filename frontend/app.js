@@ -67,7 +67,9 @@ async function renderMain() {
 
     <div class="action-row">
       <button id="transcribeBtn" ${session.transcript ? "disabled" : ""}>Transcribe</button>
-      <button id="suggestBtn" ${!session.transcript || session.clips.length ? "disabled" : ""}>Suggest clips</button>
+      <button id="suggestBtn" ${!session.transcript ? "disabled" : ""}>
+        ${session.clips.length ? "Re-suggest clips" : "Suggest clips"}
+      </button>
       <button id="translateBtn" ${!session.transcript ? "disabled" : ""}>
         ${hasEnglish ? "Re-translate captions" : "Translate captions (English)"}
       </button>
@@ -89,7 +91,10 @@ async function renderMain() {
 
   document.getElementById("deleteSessionBtn").onclick = () => deleteSession(session.id);
   document.getElementById("transcribeBtn").onclick = () => runJob(`/api/sessions/${session.id}/transcribe`, "POST");
-  document.getElementById("suggestBtn").onclick = () => runJob(`/api/sessions/${session.id}/suggest-clips`, "POST");
+  document.getElementById("suggestBtn").onclick = () => {
+    if (session.clips.length && !confirm(`This replaces the existing ${session.clips.length} clip(s), including any assignee/status edits. Continue?`)) return;
+    runJob(`/api/sessions/${session.id}/suggest-clips`, "POST");
+  };
   document.getElementById("translateBtn").onclick = () => runJob(`/api/sessions/${session.id}/translate-captions`, "POST");
   document.getElementById("blogBtn").onclick = () => runJob(`/api/sessions/${session.id}/generate-blog-posts`, "POST");
   document.getElementById("angleSelect").onchange = (e) => {
