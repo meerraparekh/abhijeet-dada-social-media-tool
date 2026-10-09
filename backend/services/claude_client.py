@@ -43,10 +43,17 @@ def call_structured(
 ) -> T:
     """Ask Claude for a JSON response matching `schema`, parsed into
     `result_model`. Streams (required once max_tokens is large enough that
-    the SDK estimates a plain request could run past ~10 minutes) and caps
-    thinking effort, since these are extraction/translation tasks rather
-    than hard reasoning problems - thinking otherwise eats into the same
-    token budget as the JSON output itself.
+    the SDK estimates a plain request could run past ~10 minutes).
+
+    effort defaults to "low" for genuinely mechanical per-item work (e.g.
+    translating each transcript segment in place) - but a real session
+    asking for an exhaustive sweep over a ~2.5 hour transcript ("find
+    EVERY clip-worthy moment", 20-40+ expected) came back with only 3
+    clips at low effort: that setting trades thoroughness for fewer,
+    more-consolidated passes, which is the wrong tradeoff for a
+    long-horizon "don't miss anything in this whole document" task.
+    Callers doing that kind of broad-coverage extraction should pass
+    effort="high" explicitly.
 
     A long transcript asking for a lot of structured output (e.g. 20-40
     clips with 15 fields each) can legitimately take a couple of minutes to

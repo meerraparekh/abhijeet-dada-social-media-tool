@@ -156,5 +156,10 @@ def suggest_clips(
         schema=_CLIP_SUGGESTIONS_SCHEMA,
         result_model=ClipSuggestions,
         max_tokens=64000,
+        # This is an exhaustive sweep over the whole transcript ("find
+        # EVERY clip-worthy moment"), not a quick lookup - low effort (the
+        # call_structured default) came back with only 3 clips on a real
+        # 2.5 hour session instead of the 20-40+ a full pass should find.
+        effort="high",
         progress_cb=progress_cb,
     )

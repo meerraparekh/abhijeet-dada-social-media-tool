@@ -105,5 +105,9 @@ def generate_blog_posts(
         # output text - same headroom as clip suggestion/translation to avoid
         # the max_tokens truncation failures hit earlier in this project.
         max_tokens=64000,
+        # Same reasoning as clip_suggester: identifying every distinct topic
+        # across the whole transcript is a broad-coverage sweep, not a quick
+        # lookup - needs more than the call_structured default of "low".
+        effort="high",
         progress_cb=progress_cb,
     )
