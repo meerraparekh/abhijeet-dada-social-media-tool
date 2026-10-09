@@ -7,7 +7,7 @@ shorter, topic-based posts rather than one long dump.
 """
 from __future__ import annotations
 
-from typing import List
+from typing import Callable, List, Optional
 
 from pydantic import BaseModel
 
@@ -92,7 +92,9 @@ class BlogPostSuggestions(BaseModel):
     posts: List[BlogPostSuggestion]
 
 
-def generate_blog_posts(transcript: Transcript) -> BlogPostSuggestions:
+def generate_blog_posts(
+    transcript: Transcript, progress_cb: Optional[Callable[[str], None]] = None
+) -> BlogPostSuggestions:
     transcript_text = format_transcript_for_prompt(transcript)
     return call_structured(
         system=SYSTEM_PROMPT,
@@ -103,4 +105,5 @@ def generate_blog_posts(transcript: Transcript) -> BlogPostSuggestions:
         # output text - same headroom as clip suggestion/translation to avoid
         # the max_tokens truncation failures hit earlier in this project.
         max_tokens=64000,
+        progress_cb=progress_cb,
     )

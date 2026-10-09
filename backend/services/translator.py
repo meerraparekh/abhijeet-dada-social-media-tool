@@ -10,7 +10,7 @@ from the original.
 """
 from __future__ import annotations
 
-from typing import List
+from typing import Callable, List, Optional
 
 from pydantic import BaseModel
 
@@ -45,7 +45,9 @@ class _Translations(BaseModel):
     translations: List[str]
 
 
-def translate_segments(transcript: Transcript) -> List[str]:
+def translate_segments(
+    transcript: Transcript, progress_cb: Optional[Callable[[str], None]] = None
+) -> List[str]:
     """Returns one English translation string per transcript segment, in order."""
     # Whisper occasionally hallucinates nonsense text (a known failure mode
     # during unclear/near-silent audio) instead of correctly transcribing
@@ -65,6 +67,7 @@ def translate_segments(transcript: Transcript) -> List[str]:
         # long session - this is a lot more output than clip suggestions,
         # which only cover a handful of chosen moments.
         max_tokens=64000,
+        progress_cb=progress_cb,
     )
     if len(result.translations) != len(transcript.segments):
         raise RuntimeError(

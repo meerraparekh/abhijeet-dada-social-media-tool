@@ -69,7 +69,7 @@ def test_translate_segments_replaces_hallucinated_text_without_dropping_the_slot
     class _FakeResult(BaseModel):
         translations: List[str]
 
-    def fake_call_structured(system, user_content, schema, result_model, max_tokens):
+    def fake_call_structured(system, user_content, schema, result_model, max_tokens, progress_cb=None):
         captured["user_content"] = user_content
         return _FakeResult(translations=["one", "(inaudible)", "three"])
 

@@ -489,7 +489,7 @@ def suggest_clips(session_id: str) -> dict:
                 "stretch - consider re-transcribing with a larger WHISPER_MODEL_SIZE "
                 "(e.g. 'small') for better accuracy."
             )
-        suggestions = clip_suggester.suggest_clips(session.transcript)
+        suggestions = clip_suggester.suggest_clips(session.transcript, progress_cb=progress_cb)
         s = store.load(session_id)
         s.clips = [Clip(**c.model_dump()) for c in suggestions.clips]
         s.status = "ready"
@@ -509,7 +509,7 @@ def translate_captions(session_id: str) -> dict:
 
     def work(progress_cb):
         progress_cb("asking Claude to translate the transcript to English")
-        translations = translator.translate_segments(session.transcript)
+        translations = translator.translate_segments(session.transcript, progress_cb=progress_cb)
         caption_words = translator.build_english_caption_words(session.transcript, translations)
         s = store.load(session_id)
         s.transcript.caption_words_en = caption_words
@@ -533,7 +533,7 @@ def generate_blog_posts(session_id: str) -> dict:
 
     def work(progress_cb):
         progress_cb("asking Claude to write blog posts from the transcript")
-        suggestions = blog_writer.generate_blog_posts(session.transcript)
+        suggestions = blog_writer.generate_blog_posts(session.transcript, progress_cb=progress_cb)
         s = store.load(session_id)
         s.blog_posts = [BlogPost(**p.model_dump()) for p in suggestions.posts]
         store.save(s)

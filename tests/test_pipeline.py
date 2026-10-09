@@ -65,7 +65,7 @@ def client(tmp_path, monkeypatch):
             progress_cb("fake transcription complete")
         return Transcript(language="en", segments=segs, words=words)
 
-    def fake_suggest(transcript):
+    def fake_suggest(transcript, progress_cb=None):
         last_word_end = transcript.words[-1].end
         return ClipSuggestions(
             clips=[
@@ -89,10 +89,10 @@ def client(tmp_path, monkeypatch):
             ]
         )
 
-    def fake_translate_segments(transcript):
+    def fake_translate_segments(transcript, progress_cb=None):
         return [f"[EN] {seg.text}" for seg in transcript.segments]
 
-    def fake_generate_blog_posts(transcript):
+    def fake_generate_blog_posts(transcript, progress_cb=None):
         return BlogPostSuggestions(
             posts=[
                 BlogPostSuggestion(

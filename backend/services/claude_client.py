@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Type, TypeVar
+from typing import Callable, Optional, Type, TypeVar
 
 import anthropic
 import httpx2
@@ -39,13 +39,22 @@ def call_structured(
     max_tokens: int = 32000,
     effort: str = "low",
     max_attempts: int = 3,
+    progress_cb: Optional[Callable[[str], None]] = None,
 ) -> T:
     """Ask Claude for a JSON response matching `schema`, parsed into
     `result_model`. Streams (required once max_tokens is large enough that
     the SDK estimates a plain request could run past ~10 minutes) and caps
     thinking effort, since these are extraction/translation tasks rather
     than hard reasoning problems - thinking otherwise eats into the same
-    token budget as the JSON output itself."""
+    token budget as the JSON output itself.
+
+    A long transcript asking for a lot of structured output (e.g. 20-40
+    clips with 15 fields each) can legitimately take a couple of minutes to
+    generate - with no visible progress in that stretch, this looked
+    indistinguishable from "stuck" in a real session and led to the request
+    being abandoned mid-flight. progress_cb, if given, is called periodically
+    with a running character count straight from the response stream as
+    proof the request is still alive."""
     client = anthropic.Anthropic()
     response = None
     for attempt in range(1, max_attempts + 1):
@@ -57,6 +66,15 @@ def call_structured(
                 messages=[{"role": "user", "content": user_content}],
                 output_config={"effort": effort, "format": {"type": "json_schema", "schema": schema}},
             ) as stream:
+                if progress_cb:
+                    chars = 0
+                    last_update = time.monotonic()
+                    for chunk in stream.text_stream:
+                        chars += len(chunk)
+                        now = time.monotonic()
+                        if now - last_update >= 3:
+                            progress_cb(f"Claude is writing its response... ({chars} characters so far)")
+                            last_update = now
                 response = stream.get_final_message()
             break
         except _TRANSIENT_NETWORK_ERRORS as exc:

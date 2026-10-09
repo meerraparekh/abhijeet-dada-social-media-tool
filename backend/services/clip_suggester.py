@@ -8,6 +8,8 @@ task like this - expect well under $0.15 per session for this step.
 """
 from __future__ import annotations
 
+from typing import Callable, Optional
+
 from schemas import ClipSuggestions, Transcript
 from services.claude_client import call_structured
 from services.transcript_hygiene import looks_hallucinated
@@ -140,7 +142,9 @@ def _mmss(seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
-def suggest_clips(transcript: Transcript) -> ClipSuggestions:
+def suggest_clips(
+    transcript: Transcript, progress_cb: Optional[Callable[[str], None]] = None
+) -> ClipSuggestions:
     transcript_text = format_transcript_for_prompt(transcript)
     # With the clip-count cap removed, a dense ~2 hour session can easily
     # produce 20-40+ clips, each with several caption fields - raised from
@@ -152,4 +156,5 @@ def suggest_clips(transcript: Transcript) -> ClipSuggestions:
         schema=_CLIP_SUGGESTIONS_SCHEMA,
         result_model=ClipSuggestions,
         max_tokens=64000,
+        progress_cb=progress_cb,
     )
