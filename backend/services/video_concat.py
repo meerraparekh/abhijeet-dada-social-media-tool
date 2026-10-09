@@ -155,6 +155,11 @@ def concat_videos(parts: List[Path], out_path: Path) -> None:
                 "-filter_complex", filter_complex,
                 "-map", "[v]", "-map", "[a]",
                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                # Some source footage (e.g. iPhone HEVC) is 10-bit - without
+                # this, ffmpeg can carry that through into a High10-profile
+                # H.264 output that common players (e.g. Windows' built-in
+                # player) can't open. Force standard 8-bit 4:2:0.
+                "-pix_fmt", "yuv420p",
                 "-c:a", "aac", "-b:a", "192k",
                 str(tmp_out),
             ], timeout=_reencode_timeout_seconds(expected_duration))

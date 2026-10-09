@@ -344,6 +344,12 @@ def render_clip_for_angle(
             "-to", str(seg_end),
             "-vf", vf,
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            # Some source footage (e.g. iPhone HEVC) is 10-bit - without this,
+            # ffmpeg can carry that through into a High10-profile H.264 output
+            # that Windows' built-in player can't open ("unsupported encoding
+            # settings", 0x80004005) even though it plays fine elsewhere.
+            # Force standard 8-bit 4:2:0 for broad compatibility.
+            "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "192k",
             str(out_path),
         ]
@@ -366,6 +372,7 @@ def render_clip_for_angle(
             "-filter_complex", filter_complex,
             "-map", "[vout]", "-map", "[acat]",
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "192k",
             str(out_path),
         ]
