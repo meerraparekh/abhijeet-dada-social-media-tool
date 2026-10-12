@@ -369,8 +369,11 @@ def delete_angle(session_id: str, angle_id: str) -> dict:
 
 @app.post("/api/sessions/{session_id}/angles/{angle_id}/resync")
 def resync_angle(session_id: str, angle_id: str) -> dict:
-    """Retry sync for an angle that previously failed (e.g. a transient
-    ffmpeg error), without re-uploading the file."""
+    """Re-run automatic audio sync for a non-primary angle, without
+    re-uploading the file - whether it previously failed (e.g. a transient
+    ffmpeg error), came back low_confidence, or was already "synced" but
+    the sync algorithm has since changed and the user wants a fresh
+    estimate rather than only a manual override."""
     session = _get_session_or_404(session_id)
     angle = _get_angle_or_404(session, angle_id)
     if angle.is_primary:

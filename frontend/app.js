@@ -157,8 +157,8 @@ function renderAngles(session) {
       const extra = a.sync_status === "synced" || a.sync_status === "low_confidence"
         ? ` (offset ${a.offset_seconds.toFixed(2)}s${confidenceNote})`
         : "";
-      const retry = a.sync_status === "failed"
-        ? `<button class="secondary resync-btn" data-angle="${a.id}">Retry sync</button>`
+      const retry = !a.is_primary && a.sync_status !== "pending"
+        ? `<button class="secondary resync-btn" data-angle="${a.id}">Re-run auto sync</button>`
         : "";
       const del = !a.is_primary
         ? `<button class="secondary delete-angle-btn" data-angle="${a.id}">Remove</button>`
