@@ -13,6 +13,14 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "backend"))
 
+# These tests are about the API/job wiring, not sync accuracy (that's
+# test_sync.py's job, with realistically-sized data) - the clips here are a
+# couple of seconds of pure sine tone, which has no amplitude rhythm for the
+# envelope-based correlation to lock onto, so "low_confidence" is a valid,
+# expected outcome here alongside "synced"; only "failed" means the job
+# itself broke.
+_SYNC_OK_STATUSES = ("synced", "low_confidence")
+
 
 def _make_clip(path: Path, duration: float, color: str) -> None:
     subprocess.run(
@@ -102,7 +110,7 @@ def test_add_angle_accepts_split_recording_and_syncs(client, tmp_path):
         return a if a["sync_status"] != "pending" else None
 
     angle = _wait_for(settled)
-    assert angle["sync_status"] == "synced", angle
+    assert angle["sync_status"] in _SYNC_OK_STATUSES, angle
     assert angle["duration_seconds"] == pytest.approx(6.0, abs=0.5)
 
 
@@ -131,7 +139,7 @@ def test_append_footage_grows_an_existing_angle(client, tmp_path):
         return a if a["sync_status"] != "pending" else None
 
     angle = _wait_for(settled)
-    assert angle["sync_status"] == "synced"
+    assert angle["sync_status"] in _SYNC_OK_STATUSES, angle
     assert angle["duration_seconds"] == pytest.approx(3.0, abs=0.5)
 
     # the camera stopped - more footage for the same angle turns up later
@@ -145,7 +153,7 @@ def test_append_footage_grows_an_existing_angle(client, tmp_path):
     assert res.status_code == 200, res.text
 
     angle = _wait_for(settled)
-    assert angle["sync_status"] == "synced", angle
+    assert angle["sync_status"] in _SYNC_OK_STATUSES, angle
     assert angle["duration_seconds"] == pytest.approx(6.0, abs=0.5)
 
     # appending while a sync is already pending is rejected, not queued

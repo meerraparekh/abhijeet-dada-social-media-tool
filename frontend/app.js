@@ -144,6 +144,7 @@ const SYNC_LABELS = {
   primary: "primary",
   pending: "syncing...",
   synced: "synced",
+  low_confidence: "sync uncertain - please verify",
   failed: "sync failed",
 };
 
@@ -152,7 +153,10 @@ function renderAngles(session) {
   const rows = session.angles
     .map((a) => {
       const badge = SYNC_LABELS[a.sync_status] || a.sync_status;
-      const extra = a.sync_status === "synced" ? ` (offset ${a.offset_seconds.toFixed(2)}s)` : "";
+      const confidenceNote = a.sync_confidence != null ? `, confidence ${a.sync_confidence.toFixed(1)}` : "";
+      const extra = a.sync_status === "synced" || a.sync_status === "low_confidence"
+        ? ` (offset ${a.offset_seconds.toFixed(2)}s${confidenceNote})`
+        : "";
       const retry = a.sync_status === "failed"
         ? `<button class="secondary resync-btn" data-angle="${a.id}">Retry sync</button>`
         : "";

@@ -11,7 +11,7 @@ ClipStatus = Literal["suggested", "claimed", "rendering", "done"]
 SessionStatus = Literal[
     "uploaded", "transcribing", "transcribed", "suggesting", "ready", "error"
 ]
-SyncStatus = Literal["primary", "pending", "synced", "failed"]
+SyncStatus = Literal["primary", "pending", "synced", "low_confidence", "failed"]
 
 
 def new_id() -> str:
@@ -111,6 +111,14 @@ class VideoAngle(BaseModel):
     duration_seconds: Optional[float] = None  # None until probed
     sync_status: SyncStatus = "pending"
     sync_error: Optional[str] = None
+    # Peak-to-sidelobe ratio from the cross-correlation (see services/sync.py)
+    # - how much the best-matching offset stands out from the surrounding
+    # correlation floor. Real multi-camera audio (different mic/distance/room
+    # reverb per camera) can produce a confident-looking offset that's
+    # actually wrong with no way to tell from offset_seconds alone; this is
+    # that signal. None for the primary angle (never computed) or an angle
+    # synced manually (services/main.py's offset override doesn't set it).
+    sync_confidence: Optional[float] = None
 
 
 class BlogPost(BaseModel):

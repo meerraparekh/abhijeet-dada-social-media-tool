@@ -119,6 +119,16 @@ async def _save_upload_parts(session_id: str, prefix: str, files: List[UploadFil
     return paths
 
 
+def _apply_sync_result(angle: VideoAngle, offset_seconds: float, confidence: float) -> None:
+    """Store a freshly-estimated sync offset, flagging it for manual review
+    rather than silently trusting it when the correlation peak wasn't
+    clearly dominant - see sync.LOW_CONFIDENCE_THRESHOLD."""
+    angle.offset_seconds = offset_seconds
+    angle.sync_confidence = confidence
+    angle.sync_status = "synced" if confidence >= sync.LOW_CONFIDENCE_THRESHOLD else "low_confidence"
+    angle.sync_error = None
+
+
 def _concat_probe_and_sync(
     session_id: str,
     angle_id: str,
@@ -163,11 +173,10 @@ def _concat_probe_and_sync(
     progress_cb(f"syncing angle {a.label!r} against the primary angle")
     p = s.primary_angle()
     try:
-        a.offset_seconds = sync.estimate_offset_seconds(
+        offset, confidence = sync.estimate_offset_seconds(
             store.session_dir(session_id) / p.filename, final_path
         )
-        a.sync_status = "synced"
-        a.sync_error = None
+        _apply_sync_result(a, offset, confidence)
     except sync.SyncFailed as exc:
         a.sync_status = "failed"
         a.sync_error = str(exc)
@@ -373,12 +382,11 @@ def resync_angle(session_id: str, angle_id: str) -> dict:
         a = next(x for x in s.angles if x.id == angle_id)
         p = s.primary_angle()
         try:
-            a.offset_seconds = sync.estimate_offset_seconds(
+            offset, confidence = sync.estimate_offset_seconds(
                 store.session_dir(session_id) / p.filename,
                 store.session_dir(session_id) / a.filename,
             )
-            a.sync_status = "synced"
-            a.sync_error = None
+            _apply_sync_result(a, offset, confidence)
         except sync.SyncFailed as exc:
             a.sync_status = "failed"
             a.sync_error = str(exc)
