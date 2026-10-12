@@ -166,6 +166,14 @@ function renderAngles(session) {
             <span class="progress-note append-footage-note"></span>
           </form>`
         : "";
+      const offsetForm = !a.is_primary && a.sync_status !== "pending"
+        ? `<form class="offset-form" data-angle="${a.id}">
+            <label style="font-size:12px;color:var(--muted)">Manual offset (s, primary_time + offset = this angle's time):</label>
+            <input type="number" step="0.01" class="offset-input" value="${a.offset_seconds.toFixed(2)}" />
+            <button type="submit" class="secondary">Save offset</button>
+            <span class="progress-note offset-note"></span>
+          </form>`
+        : "";
       return `<div class="angle-row-wrap">
         <div class="angle-row">
           <strong>${escapeHtml(a.label)}</strong>
@@ -173,6 +181,7 @@ function renderAngles(session) {
           ${a.sync_error ? `<span class="error-note">${escapeHtml(a.sync_error)}</span>` : ""}
           ${retry} ${del}
         </div>
+        ${offsetForm}
         ${appendForm}
       </div>`;
     })
@@ -234,6 +243,30 @@ function renderAngles(session) {
     } catch (err) {
       note.innerHTML = `<span class="error-note">${escapeHtml(err.message)}</span>`;
     }
+  });
+
+  el.querySelectorAll(".offset-form").forEach((form) => {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const angleId = form.dataset.angle;
+      const offsetSeconds = parseFloat(form.querySelector(".offset-input").value);
+      const note = form.querySelector(".offset-note");
+      if (Number.isNaN(offsetSeconds)) {
+        note.innerHTML = `<span class="error-note">Enter a number</span>`;
+        return;
+      }
+      note.textContent = "Saving...";
+      try {
+        await api(`/api/sessions/${session.id}/angles/${angleId}/offset`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ offset_seconds: offsetSeconds }),
+        });
+        renderMain();
+      } catch (err) {
+        note.innerHTML = `<span class="error-note">${escapeHtml(err.message)}</span>`;
+      }
+    });
   });
 
   el.querySelectorAll(".append-footage-form").forEach((form) => {

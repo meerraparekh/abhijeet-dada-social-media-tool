@@ -388,6 +388,32 @@ def resync_angle(session_id: str, angle_id: str) -> dict:
     return {"job_id": job.id}
 
 
+class OffsetUpdate(BaseModel):
+    offset_seconds: float
+
+
+@app.patch("/api/sessions/{session_id}/angles/{angle_id}/offset")
+def set_angle_offset(session_id: str, angle_id: str, req: OffsetUpdate) -> VideoAngle:
+    """Manually set an angle's sync offset, overriding (or fixing) the
+    automatic audio cross-correlation. Real multi-camera audio - different
+    mic quality/distance/room reverb between cameras in a large hall - can
+    fool cross-correlation into a confidently wrong offset with no way to
+    tell from the number alone; this is the escape hatch: play the primary
+    and this angle side by side (switch the preview angle dropdown, use
+    "Current time") to find the same real moment in both, then set
+    offset = (that moment's time in this angle) - (that moment's time in
+    the primary)."""
+    session = _get_session_or_404(session_id)
+    angle = _get_angle_or_404(session, angle_id)
+    if angle.is_primary:
+        raise HTTPException(400, "primary angle doesn't need an offset")
+    angle.offset_seconds = req.offset_seconds
+    angle.sync_status = "synced"
+    angle.sync_error = None
+    store.save(session)
+    return angle
+
+
 # ---------- transcription ----------
 
 @app.post("/api/sessions/{session_id}/transcribe")
