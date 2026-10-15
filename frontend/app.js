@@ -172,9 +172,10 @@ function renderAngles(session) {
         : "";
       const offsetForm = !a.is_primary && a.sync_status !== "pending"
         ? `<form class="offset-form" data-angle="${a.id}">
-            <label style="font-size:12px;color:var(--muted)">Manual offset (s, primary_time + offset = this angle's time):</label>
+            <label style="font-size:12px;color:var(--muted)">Offset (s, primary_time + offset = this angle's time) - rough guess is fine for "Refine":</label>
             <input type="number" step="0.01" class="offset-input" value="${a.offset_seconds.toFixed(2)}" />
-            <button type="submit" class="secondary">Save offset</button>
+            <button type="submit" class="secondary">Save offset (exact)</button>
+            <button type="button" class="secondary refine-offset-btn" data-angle="${a.id}">Refine with audio sync</button>
             <span class="progress-note offset-note"></span>
           </form>`
         : "";
@@ -271,6 +272,34 @@ function renderAngles(session) {
         note.innerHTML = `<span class="error-note">${escapeHtml(err.message)}</span>`;
       }
     });
+  });
+
+  el.querySelectorAll(".refine-offset-btn").forEach((btn) => {
+    btn.onclick = async () => {
+      const form = btn.closest(".offset-form");
+      const angleId = btn.dataset.angle;
+      const approxOffset = parseFloat(form.querySelector(".offset-input").value);
+      const note = form.querySelector(".offset-note");
+      if (Number.isNaN(approxOffset)) {
+        note.innerHTML = `<span class="error-note">Enter a rough offset guess first</span>`;
+        return;
+      }
+      note.textContent = "Refining...";
+      try {
+        const { job_id } = await api(`/api/sessions/${session.id}/angles/${angleId}/sync-near`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ approx_offset_seconds: approxOffset }),
+        });
+        pollJob(job_id, (job) => {
+          note.textContent = job.state === "running" ? job.progress || "refining..." : "";
+          if (job.state === "done") renderMain();
+          if (job.state === "error") note.innerHTML = `<span class="error-note">${escapeHtml(job.error)}</span>`;
+        });
+      } catch (err) {
+        note.innerHTML = `<span class="error-note">${escapeHtml(err.message)}</span>`;
+      }
+    };
   });
 
   el.querySelectorAll(".append-footage-form").forEach((form) => {

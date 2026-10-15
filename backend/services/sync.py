@@ -42,12 +42,16 @@ class SyncFailed(Exception):
     pass
 
 
-def _extract_mono_audio(video_path: Path, duration: float) -> np.ndarray:
-    """Decode the first `duration` seconds of a video's audio to mono
-    float32 PCM at SAMPLE_RATE via ffmpeg."""
+def _extract_mono_audio(video_path: Path, duration: float, start_seconds: float = 0.0) -> np.ndarray:
+    """Decode `duration` seconds of a video's audio, starting at
+    `start_seconds`, to mono float32 PCM at SAMPLE_RATE via ffmpeg. -ss
+    comes after -i (accurate seek, not fast seek) since a narrow sync
+    search depends on the window actually starting where it says it does -
+    a fast-seek's rounding to the nearest keyframe would quietly bias the
+    result by however far off that keyframe is."""
     cmd = [
         "ffmpeg", "-y", "-i", str(video_path),
-        "-t", str(duration),
+        "-ss", str(start_seconds), "-t", str(duration),
         "-vn", "-ac", "1", "-ar", str(SAMPLE_RATE),
         "-f", "f32le", "-",
     ]
@@ -97,10 +101,52 @@ def estimate_offset_seconds(primary_path: Path, other_path: Path) -> Tuple[float
     angle's own time, for the same real moment in the recording. confidence
     is a peak-to-sidelobe ratio - how much the best-matching offset stands
     out from the surrounding correlation floor - for the caller to decide
-    whether to trust it (see LOW_CONFIDENCE_THRESHOLD)."""
+    whether to trust it (see LOW_CONFIDENCE_THRESHOLD).
+
+    This only works if the two WINDOW_SECONDS windows compared (the start
+    of each file) actually cover the same real moment - true only if both
+    cameras started recording within MAX_OFFSET_SECONDS of each other. A
+    real session confirmed this assumption can be badly wrong: cameras set
+    up well apart in time mean the first few minutes of each file are
+    genuinely different parts of the talk, which no correlation method can
+    "find" a match for since there isn't one in the window searched. See
+    estimate_offset_near for that case."""
     a = _extract_mono_audio(primary_path, WINDOW_SECONDS)
     b = _extract_mono_audio(other_path, WINDOW_SECONDS)
     return _offset_from_signals(a, b, SAMPLE_RATE)
+
+
+def estimate_offset_near(
+    primary_path: Path,
+    other_path: Path,
+    approx_offset_seconds: float,
+    search_radius_seconds: float = 45.0,
+    window_seconds: float = 90.0,
+) -> Tuple[float, float]:
+    """Refine a rough, user-eyeballed offset guess into a precise one via a
+    NARROW cross-correlation search around it, instead of estimate_offset_
+    seconds' blind search from the start of each file. Two advantages once
+    a rough anchor is known to be roughly right: (1) it works even when the
+    cameras started recording far enough apart that the blind file-start
+    search never had overlapping real content to find a match in at all,
+    and (2) a narrower search space makes the confidence score far more
+    discriminating (see _offset_from_signals' confidence correction, which
+    scales with how many candidate lags are searched) - a real but modest
+    peak that's swamped by chance over a wide blind search can stand out
+    clearly once the search is this narrow."""
+    primary_audio = _extract_mono_audio(primary_path, window_seconds, start_seconds=0.0)
+    other_start = max(0.0, approx_offset_seconds - search_radius_seconds)
+    other_audio = _extract_mono_audio(
+        other_path, window_seconds + 2 * search_radius_seconds, start_seconds=other_start
+    )
+    offset_in_window, confidence = _offset_from_signals(
+        primary_audio, other_audio, SAMPLE_RATE,
+        max_offset_seconds=window_seconds + 2 * search_radius_seconds,
+    )
+    # other_audio's own array-local time 0 corresponds to real other-file
+    # time `other_start` - translate the in-window offset back to a real
+    # primary_time + offset == other_file_time offset.
+    return other_start + offset_in_window, confidence
 
 
 def _envelope(audio: np.ndarray, sample_rate: int) -> Tuple[np.ndarray, float]:
@@ -133,7 +179,9 @@ def _envelope(audio: np.ndarray, sample_rate: int) -> Tuple[np.ndarray, float]:
     return envelope, sample_rate / frame_len
 
 
-def _offset_from_signals(a: np.ndarray, b: np.ndarray, sample_rate: int) -> Tuple[float, float]:
+def _offset_from_signals(
+    a: np.ndarray, b: np.ndarray, sample_rate: int, max_offset_seconds: float = MAX_OFFSET_SECONDS
+) -> Tuple[float, float]:
     a_env, eff_rate = _envelope(a, sample_rate)
     b_env, _ = _envelope(b, sample_rate)
 
@@ -145,7 +193,7 @@ def _offset_from_signals(a: np.ndarray, b: np.ndarray, sample_rate: int) -> Tupl
     corr = correlate(a_env, b_env, mode="full", method="fft")
     lags = np.arange(-(len(b_env) - 1), len(a_env))
 
-    max_lag = int(MAX_OFFSET_SECONDS * eff_rate)
+    max_lag = int(max_offset_seconds * eff_rate)
     in_range = np.abs(lags) <= max_lag
     if not in_range.any():
         raise SyncFailed("audio too short to search the expected offset range")

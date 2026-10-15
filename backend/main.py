@@ -425,6 +425,47 @@ def set_angle_offset(session_id: str, angle_id: str, req: OffsetUpdate) -> Video
     return angle
 
 
+class ApproxOffset(BaseModel):
+    approx_offset_seconds: float
+
+
+@app.post("/api/sessions/{session_id}/angles/{angle_id}/sync-near")
+def sync_angle_near(session_id: str, angle_id: str, req: ApproxOffset) -> dict:
+    """Refine a rough, eyeballed offset guess into a precise one via a
+    narrow audio cross-correlation search - the middle ground between fully
+    automatic sync (which only works if the cameras started close enough
+    together in time that the blind file-start search actually has
+    overlapping content to find) and the fully manual offset override
+    (exact, but all on the user). Find the same real moment in the primary
+    and this angle (switch the preview angle dropdown, use "Current time"),
+    and use the rough difference as the guess - the app finds the precise
+    value around it."""
+    session = _get_session_or_404(session_id)
+    angle = _get_angle_or_404(session, angle_id)
+    if angle.is_primary:
+        raise HTTPException(400, "primary angle doesn't need syncing")
+
+    def work(progress_cb):
+        progress_cb(f"refining sync for angle {angle.label!r} near the given offset")
+        s = store.load(session_id)
+        a = next(x for x in s.angles if x.id == angle_id)
+        p = s.primary_angle()
+        try:
+            offset, confidence = sync.estimate_offset_near(
+                store.session_dir(session_id) / p.filename,
+                store.session_dir(session_id) / a.filename,
+                req.approx_offset_seconds,
+            )
+            _apply_sync_result(a, offset, confidence)
+        except sync.SyncFailed as exc:
+            a.sync_status = "failed"
+            a.sync_error = str(exc)
+        store.save(s)
+
+    job = jobs.start("sync_angle_near", session_id, work)
+    return {"job_id": job.id}
+
+
 # ---------- transcription ----------
 
 @app.post("/api/sessions/{session_id}/transcribe")
